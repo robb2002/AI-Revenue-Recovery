@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from threading import Lock
 
 import jwt
+from jwt import PyJWKClient
 from jwt.exceptions import ExpiredSignatureError, PyJWKClientConnectionError, PyJWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,10 +22,10 @@ from app.repositories.app_users import AppUserRepository
 
 logger = logging.getLogger(__name__)
 
-CLERK_JWKS_URL = "https://api.clerk.com/v1/jwks"
 CLERK_USERS_URL = "https://api.clerk.com/v1/users"
 ROLE_SALES_REP = "SALES_REP"
 _PROFILE_CACHE_TTL_SECONDS = 300.0
+_JWKS_TIMEOUT_SECONDS = 4
 
 
 @dataclass(frozen=True)
@@ -44,41 +45,71 @@ class ClerkUserProfile:
 class ClerkClient:
     def __init__(self, secret_key: str, authorized_parties: list[str]) -> None:
         self._secret_key = secret_key
-        self._jwks = jwt.PyJWKClient(
-            CLERK_JWKS_URL,
-            headers={
-                "Authorization": f"Bearer {secret_key}",
-                "User-Agent": "ai-revenue-recovery-backend",
-            },
-            lifespan=3600,
-            timeout=10,
-        )
         self._authorized_parties = frozenset(authorized_parties)
         self._profile_cache: dict[str, tuple[float, ClerkUserProfile]] = {}
         self._profile_lock = Lock()
+        self._jwks_clients: dict[str, PyJWKClient] = {}
+        self._jwks_lock = Lock()
 
-    def verify_session_token(self, token: str) -> str:
+    def _jwks_for_token(self, token: str) -> PyJWKClient:
+        """Use the token issuer's JWKS (Clerk Frontend API) — faster/more reliable than api.clerk.com."""
         try:
-            signing_key = self._jwks.get_signing_key_from_jwt(token)
-            claims = jwt.decode(
+            unverified = jwt.decode(
                 token,
-                signing_key.key,
+                options={"verify_signature": False, "verify_exp": False},
                 algorithms=["RS256"],
-                options={"require": ["exp", "sub"]},
-                leeway=5,
             )
-        except ExpiredSignatureError as exc:
-            raise AuthExpiredError() from exc
-        except PyJWKClientConnectionError as exc:
-            logger.error("Could not fetch Clerk signing keys: %s", type(exc).__name__)
-            raise AuthInvalidError() from exc
         except PyJWTError as exc:
             raise AuthInvalidError() from exc
-
-        authorized_party = claims.get("azp")
-        if authorized_party and authorized_party not in self._authorized_parties:
+        iss = str(unverified.get("iss") or "").rstrip("/")
+        if not iss.startswith("https://"):
             raise AuthInvalidError()
-        return str(claims["sub"])
+        jwks_url = f"{iss}/.well-known/jwks.json"
+        with self._jwks_lock:
+            client = self._jwks_clients.get(jwks_url)
+            if client is None:
+                client = PyJWKClient(
+                    jwks_url,
+                    headers={"User-Agent": "ai-revenue-recovery-backend"},
+                    lifespan=3600,
+                    timeout=_JWKS_TIMEOUT_SECONDS,
+                )
+                self._jwks_clients[jwks_url] = client
+            return client
+
+    def verify_session_token(self, token: str) -> str:
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                jwks = self._jwks_for_token(token)
+                signing_key = jwks.get_signing_key_from_jwt(token)
+                claims = jwt.decode(
+                    token,
+                    signing_key.key,
+                    algorithms=["RS256"],
+                    options={"require": ["exp", "sub"]},
+                    leeway=5,
+                )
+                authorized_party = claims.get("azp")
+                if authorized_party and authorized_party not in self._authorized_parties:
+                    raise AuthInvalidError()
+                return str(claims["sub"])
+            except ExpiredSignatureError as exc:
+                raise AuthExpiredError() from exc
+            except AuthInvalidError:
+                raise
+            except PyJWKClientConnectionError as exc:
+                last_exc = exc
+                logger.error(
+                    "Could not fetch Clerk signing keys (attempt %s): %s",
+                    attempt + 1,
+                    type(exc).__name__,
+                )
+                time.sleep(0.25)
+            except PyJWTError as exc:
+                raise AuthInvalidError() from exc
+        logger.error("Clerk JWKS failed after retry: %s", type(last_exc).__name__ if last_exc else "?")
+        raise AuthInvalidError() from last_exc
 
     def fetch_user_profile(self, clerk_user_id: str) -> ClerkUserProfile:
         now = time.monotonic()
@@ -102,7 +133,7 @@ class ClerkClient:
             method="GET",
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with urllib.request.urlopen(request, timeout=5) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             logger.error("Clerk user fetch failed: %s", type(exc).__name__)
