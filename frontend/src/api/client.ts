@@ -23,7 +23,10 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
 
   const headers = new Headers(init.headers)
   headers.set('Accept', 'application/json')
-  if (init.body !== undefined) headers.set('Content-Type', 'application/json')
+  // Let the browser set multipart boundary for FormData; JSON otherwise.
+  if (init.body !== undefined && !(init.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json')
+  }
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
   const response = await fetch(`${env.apiBaseUrl}${path}`, { ...init, headers })

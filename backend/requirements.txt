@@ -6,3 +6,4 @@ asyncpg==0.31.0
 pyjwt[crypto]==2.14.0
 httpx==0.28.1
 beautifulsoup4==4.12.3
+python-multipart==0.0.20
