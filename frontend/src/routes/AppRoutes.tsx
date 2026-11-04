@@ -5,6 +5,9 @@ import { DataStatusPage } from '../pages/DataStatusPage'
 import { LoginPage } from '../pages/LoginPage'
 import { RecoveryDetailPage } from '../pages/f1_recovery/RecoveryDetailPage'
 import { RecoveryListPage } from '../pages/f1_recovery/RecoveryListPage'
+import { RiskDetailPage } from '../pages/f2_risk/RiskDetailPage'
+import { RiskListPage } from '../pages/f2_risk/RiskListPage'
+import { MeetingsPage } from '../pages/f3_meetings/MeetingsPage'
 import { PlaceholderPage } from '../pages/PlaceholderPage'
 import { RequireAuth } from './RequireAuth'
 
@@ -17,16 +20,10 @@ export function AppRoutes() {
           <Route index element={<BriefingPage />} />
           <Route path="recovery" element={<RecoveryListPage />} />
           <Route path="recovery/:accountId" element={<RecoveryDetailPage />} />
-          <Route
-            path="risk"
-            element={
-              <PlaceholderPage
-                title="Revenue risk prioritizer"
-                blurb="F2 — open/stalled deals ranked by rules score with evidence."
-              />
-            }
-          />
-          <Route path="risk/:accountId" element={<PlaceholderPage title="Deal risk" blurb="F2 detail — coming next." />} />
+          <Route path="risk" element={<RiskListPage />} />
+          <Route path="risk/:accountId" element={<RiskDetailPage />} />
+          <Route path="accounts/:accountId/meetings" element={<MeetingsPage />} />
+          <Route path="meetings" element={<MeetingsPage />} />
           <Route path="knowledge" element={<PlaceholderPage title="Knowledge base" blurb="F4 document index." />} />
           <Route path="data" element={<DataStatusPage />} />
         </Route>

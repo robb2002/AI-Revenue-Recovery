@@ -11,6 +11,9 @@ __pycache__/
 .venv/
 venv/
 
+# Local meeting uploads (demo storage stand-in)
+backend/data/uploads/
+
 # Node
 node_modules/
 dist/
