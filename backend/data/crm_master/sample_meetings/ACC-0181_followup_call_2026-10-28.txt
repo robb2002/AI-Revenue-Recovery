@@ -1,0 +1,52 @@
+[SYNTHETIC TRANSCRIPT — for demonstration only.
+Georgia Institute of Technology is a real institution. This conversation did not take place.
+Contacts and commitments below are fictional demo data.]
+
+Meeting type: Follow-up call
+Date: 2026-10-28
+Account: Georgia Institute of Technology (account_id ACC-0181)
+Opportunity: MyLab for Georgia Institute of Technology (opportunity_id OPP-0181)
+Seller: Sophie Laurent
+Customer attendees:
+- Amara Bennett, Director of Digital Learning
+- Tariq Hughes, Director of Digital Learning (IT)
+- Ravi Hughes, Associate Dean, Academic Affairs
+
+---
+
+Sophie Laurent: Thanks for joining again. Last time we covered single sign-on and gateway-course practice. I want to check what has changed before your committee meeting.
+
+Amara Bennett: Good timing. We still want MyLab for the high-enrolment gateway courses, and Pearson+ as an option for students who need an affordable access model. That has not changed.
+
+Tariq Hughes: From IT, the hard requirement is LMS integration with Canvas. We need single sign-on for students and faculty through Canvas, and grades must pass back into the Canvas gradebook. If grade sync is only one-way from MyLab to Canvas, we can live with that, but we need it confirmed in writing.
+
+Sophie Laurent: Understood. I will bring the documented grade-sync behaviour and the LMS list. Anything else on integration?
+
+Tariq Hughes: Not today. We are not asking for a custom SAML setup outside Canvas for this pilot. Canvas sign-on is enough if it works.
+
+Ravi Hughes: Procurement angle. Funding has not been formally approved yet. The academic technology committee meets on 2026-11-20. Until then we cannot commit budget. Please do not send a final quote that looks like an approved purchase order.
+
+Amara Bennett: Pain points on our side are still the same: tools are disconnected across departments, and we struggle to evidence skills to employers for some programmes. Separately, students keep telling us material costs are high, which is why Pearson+ is still on the table.
+
+Sophie Laurent: Any competitors in the conversation?
+
+Amara Bennett: We are also considering another adaptive practice platform that one department already piloted last year. I will not name a preferred vendor in this call. We need a side-by-side on practice items, LMS grade passback, and student access cost.
+
+Ravi Hughes: Decision criteria for the committee will be: Canvas integration confirmed, written accessibility documentation available, student access cost, and a realistic implementation plan before spring term. If those are weak, we will postpone.
+
+Amara Bennett: Objection to flag: we still do not have a scheduled budget vote before 2026-11-20. If Pearson needs a signature before that date, we will have to say no for this cycle.
+
+Sophie Laurent: Action items from my side: send the LMS and grade-sync excerpts, send how to request accessibility documents, and draft a one-page pilot scope for three gateway courses. I will not include a discount figure.
+
+Amara Bennett: Customer commitments from us: we will introduce you to the committee chair by email this week, and Tariq will share our Canvas admin contact by Friday 2026-10-31. We are not committing to a purchase on this call.
+
+Ravi Hughes: Deadline to remember: committee pack must be with members five working days before 2026-11-20. So we need Pearson's written answers by 2026-11-12.
+
+Sophie Laurent: Recommended next step: a thirty-minute technical call with your Canvas admin in the week of 2026-11-04, then I send a follow-up email for your approval before it goes to the committee. Nothing is sent externally without your review.
+
+Amara Bennett: Agreed. Thanks.
+
+---
+
+End of transcript.
+Held-back / not stated: no approved budget amount, no discount percent, no signed contract, no won/lost decision.

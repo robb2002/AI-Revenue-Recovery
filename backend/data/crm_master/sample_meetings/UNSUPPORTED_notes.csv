@@ -1,0 +1,4 @@
+note,value
+purpose,Negative test file for Meeting Intelligence upload validation
+expected,Reject unsupported format; do not process; do not append to uploaded_meetings
+account_hint,ACC-0181

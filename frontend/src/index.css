@@ -1,0 +1,56 @@
+@import "tailwindcss";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+
+@theme {
+  --color-navy-50: #eef2f8;
+  --color-navy-100: #d8e1ef;
+  --color-navy-200: #b3c3dd;
+  --color-navy-300: #7f97be;
+  --color-navy-400: #4e6b9b;
+  --color-navy-500: #2f4e7e;
+  --color-navy-600: #1e3a66;
+  --color-navy-700: #172e52;
+  --color-navy-800: #11223d;
+  --color-navy-900: #0b1729;
+  --color-indigo-50: #eef0fe;
+  --color-indigo-100: #e0e3fc;
+  --color-indigo-200: #c4c9f9;
+  --color-indigo-500: #5b62e3;
+  --color-indigo-600: #4a4fd1;
+  --color-indigo-700: #3b3fac;
+  --color-amber-50: #fff8eb;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  --color-green-50: #ecfdf5;
+  --color-green-600: #059669;
+  --color-red-50: #fef2f2;
+  --color-red-600: #dc2626;
+  --color-neutral-0: #ffffff;
+  --color-neutral-50: #f7f9fc;
+  --color-neutral-100: #eef2f7;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-700: #334155;
+  --color-neutral-900: #0f172a;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --color-navy-600: #1e3a66;
+  --color-navy-800: #11223d;
+  --color-navy-900: #0b1729;
+  --color-indigo-600: #4a4fd1;
+  --color-amber-600: #d97706;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-neutral-50, #f7f9fc);
+  color: #0f172a;
+}
