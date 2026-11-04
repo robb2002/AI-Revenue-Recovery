@@ -1,9 +1,14 @@
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? ''
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '')
+const googleClientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() || ''
+const gmailLoginHint =
+  (import.meta.env.VITE_GMAIL_LOGIN_HINT as string | undefined)?.trim().toLowerCase() || ''
 
 export const env = {
   clerkPublishableKey,
   apiBaseUrl,
+  googleClientId,
+  gmailLoginHint,
 }
 
 export const missingEnvVars = [
