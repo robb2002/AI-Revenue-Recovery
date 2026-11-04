@@ -1,7 +1,6 @@
 import { UserButton, useUser } from '@clerk/react'
 import {
   BookOpen,
-  Database,
   FilePen,
   FileText,
   Handshake,
@@ -12,19 +11,22 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
+import { env } from '../lib/env'
 import { FictionalBadge } from './FictionalBadge'
+import { MailboxStatus } from './MailboxStatus'
 
 const NAV = [
   { to: '/', label: 'Briefing', icon: LayoutDashboard, end: true },
   { to: '/recovery', label: 'Lead Recovery', icon: RotateCcw },
   { to: '/risk', label: 'Risk', icon: ShieldAlert },
-  { to: '/accounts/ACC-0181/meetings', label: 'Meetings', icon: FileText },
-  { to: '/accounts/ACC-0181/blockers', label: 'Blockers', icon: HelpCircle },
-  { to: '/accounts/ACC-0181/drafts', label: 'Drafts', icon: FilePen },
-  { to: '/accounts/ACC-0181/handoff', label: 'Handoff', icon: Handshake },
-  { to: '/signal-scout', label: 'Signal Scout', icon: Radar },
+  { to: '/meetings', label: 'Meetings', icon: FileText },
+  { to: '/blockers', label: 'Blockers', icon: HelpCircle },
+  { to: '/drafts', label: 'Drafts', icon: FilePen },
+  { to: '/handoff', label: 'Handoff', icon: Handshake },
+  ...(env.signalScoutFeature
+    ? [{ to: '/signal-scout', label: 'Signal Scout', icon: Radar }]
+    : []),
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
-  { to: '/data', label: 'Data', icon: Database },
 ]
 
 export function AppShell() {
@@ -66,9 +68,14 @@ export function AppShell() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 items-center justify-between border-b border-neutral-200 bg-white px-6">
-          <p className="text-sm text-neutral-500">Human-approved actions · nothing sent automatically</p>
-          <FictionalBadge />
+        <header className="flex h-16 items-center justify-between gap-3 border-b border-neutral-200 bg-white px-6">
+          <p className="hidden text-sm text-neutral-500 sm:block">
+            Human-approved actions · nothing sent automatically
+          </p>
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            <MailboxStatus />
+            <FictionalBadge />
+          </div>
         </header>
         <main className="flex-1 overflow-auto p-6">
           <Outlet />

@@ -206,6 +206,8 @@ meeting pre-generated fields, `uploaded_meetings`, signals, blocker, drafts, han
   "at_risk_note": "At-risk value is not lost revenue.",
   "recovery_eligible_count": 0,
   "high_risk_count": 0,
+  "medium_risk_count": 0,
+  "low_risk_count": 0,
   "open_blocker_count": 0,
   "won_pending_handoff_count": 0,
   "briefing": [
@@ -216,12 +218,17 @@ meeting pre-generated fields, `uploaded_meetings`, signals, blocker, drafts, han
       "recommended_action": "…",
       "priority": "high",
       "feature_key": "risk_prioritizer",
+      "score": 0,
       "href": "/risk/ACC-…"
     }
   ],
   "data_label": "Fictional demo data"
 }
 ```
+
+`medium_risk_count` / `low_risk_count` and `*_risk_usd` support briefing risk-band charts
+(open/stalled only). Briefing `score` is the stored `revenue_risk_score` (rules).
+
 
 Briefing items are rule-ordered. Risk-related items **must** include `account_id` and `href` to
 `/risk/{account_id}` (F2 must-have deep link). Recovery items may use `/recovery/{account_id}`.
@@ -256,37 +263,36 @@ after draft generation.
 
 Full brief: `docs/features/F1_LOST_LEAD_RECOVERY.md`. Gmail is **readonly** for MVP (no Send).
 
-### `GET /gmail/connect` · `GET /gmail/callback` · `GET /gmail/status`
+### Briefing inbox (live Gmail → CRM match → human approve)
 
-OAuth connect for the signed-in salesperson. Tokens stored outside `crm_master` (e.g.
-`gmail_connections`). Status returns connected mailbox identity if any.
+Sales mailbox sync lives on **Today’s briefing**, not inside each recovery detail.
 
-### `POST /accounts/{account_id}/gmail/sync`
+### `GET /gmail/status`
 
-Fetches Gmail messages matching the account’s `contact_email` (To/From/Cc). Returns
-`new_messages` and `previous_messages` with `gmail_message_id`, dates, from/to, subject, snippet.
-If Gmail is disconnected or fixtures mode is on, returns the PRD §15 fixture shape. Empty match
-→ empty arrays (do not invent). No `contact_email` → `422 NO_CONTACT_EMAIL`. Does **not** write
-CRM.
+`{ connected, mode, mailbox_email, login_hint, pending_crm_approvals, last_synced_at, can_send }`.
 
-### `GET /accounts/{account_id}/gmail/thread`
+### `POST /gmail/inbox/refresh`
 
-Last synced thread DTO for the account (same shape as sync response).
+Body: `{ "access_token": "<Google GIS gmail.readonly token>" }`.  
+Fetches recent inbox messages via Gmail API, matches to `crm_master` by `contact_email` (exact)
+or account-name hint in subject/snippet. Returns matched + unmatched items with proposed CRM
+field updates. **Does not write CRM.**
 
-### `GET /accounts/{account_id}/crm-log/preview`
+### `GET /gmail/inbox`
 
-No DB write. Body/query indicates `source=draft|gmail` and optional `gmail_message_id`.  
-Returns proposed `activity_history` item, field updates, and `will_not_change` (deal_status stays
-lost/inactive; not “recovered” revenue).
+Cached last refresh.
 
-### `POST /accounts/{account_id}/crm-log/confirm`
+### `GET /gmail/inbox/{gmail_message_id}/preview`  
+### `POST /gmail/inbox/{gmail_message_id}/approve`
 
-Body: `{ "confirm": true, "source": "draft"|"gmail", "gmail_message_id"?, "subject"?, "body_summary"? }`.  
-Applies preview in one transaction. Does **not** reopen or mark won. Without `confirm: true` →
-`422 CONFIRMATION_REQUIRED`.
+Preview / confirm CRM patch for a matched message (`confirm: true` required). Updates
+`activity_history`, last-contact dates, optionally `recovery_eligibility`. Does **not** change
+`deal_status`, send email, or mark recovered. Idempotent if `gmail_message_id` already logged.
 
-Aliases (same effect): `GET/POST .../email-sync/preview|confirm`,
-`POST .../activities/email-sent`.
+### `GET /accounts/{account_id}/crm-log/preview` · `POST .../crm-log/confirm`
+
+Draft-only path on recovery detail (re-engagement draft → CRM activity). Gmail approve uses
+`/gmail/inbox/*` instead.
 
 ---
 
@@ -496,17 +502,35 @@ Full brief: `docs/features/F6_CUSTOMER_HANDOFF.md`. Mark-won confirm UX, pack sh
 Full brief: `docs/features/F7_SIGNAL_SCOUT.md`. Pre-RFP public signals + potential opportunities.
 Build only after F1–F6 must-haves unless explicitly prioritized.
 
+**Pipeline (poll stages):** `resolve_hubs` → `validate_pages` → `fetch` → `extract` →
+`validate_evidence` → `correlate` → `completed` \| `failed`.
+
+**Live discovery:** Scan starts from the target `website_url` homepage, ranks same-domain
+links, AI (or rules) selects hubs, validates (domain/robots), extracts signals, and upserts
+pages into `signal_scout_pages` for that university target.
+
+**Two layers:** nine **page hub** categories (`procurement`, `technology`, `digital_learning`,
+`assessment`, `funding`, `leadership`, `strategic_initiative`, `partnership`, `news`) feed
+extraction into seven **signal types** (see F7 PRD §5.3). Hubs ≠ types.
+
+**Score factors (rules):** `procurement_relevance`, `related_signal_strength`,
+`assessment_edtech_relevance`, `recency`, `source_reliability`.
+
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/signal-scout/targets/search` | CRM + recent manual targets |
 | POST | `/signal-scout/targets` | From `account_id` or `{ name, website_url }` |
-| GET | `/signal-scout/targets/{target_id}` | Card: name, URL, last scanned |
+| GET | `/signal-scout/targets/{target_id}` | Card: name, URL, last scanned, stored `pages` |
 | POST | `/signal-scout/targets/{target_id}/scan` | `202` + `scan_id` |
-| GET | `/signal-scout/scans/{scan_id}` | Poll status |
-| GET | `/signal-scout/targets/{target_id}/signals` | Evidence-backed signals |
+| GET | `/signal-scout/scans/{scan_id}` | Poll status, `stage`, categorized `page_outcomes` |
+| GET | `/signal-scout/targets/{target_id}/pages` | Pages stored for this university target |
+| GET | `/signal-scout/targets/{target_id}/signals` | Evidence-backed signals (7 types) |
 | GET | `/signal-scout/targets/{target_id}/opportunities` | Potential opportunities |
 | GET | `/signal-scout/opportunities/{opportunity_id}` | Detail + score factors |
 | POST | `/signal-scout/opportunities/{id}/explain` | AI explains rules score only |
+
+`page_outcomes[]` on scan poll: `{ url, page_category, status, title }` where `status` is
+`ok` \| `failed` \| `skipped_robots` \| `domain_mismatch`.
 
 ---
 
@@ -520,8 +544,8 @@ Build only after F1–F6 must-haves unless explicitly prioritized.
 | GET | `/dashboard` | Shell |
 | GET | `/accounts`, `/accounts/{account_id}` | CRM |
 | GET | `/recovery`, `/accounts/{id}/recovery` | F1 |
-| POST | `/accounts/{id}/drafts/reengagement`, `/reopen`, `/gmail/sync`, `/crm-log/*` | F1 |
-| GET | `/gmail/connect`, `/gmail/callback`, `/gmail/status`, `/accounts/{id}/gmail/thread` | F1 |
+| POST | `/accounts/{id}/drafts/reengagement`, `/reopen`, `/crm-log/*` | F1 |
+| GET/POST | `/gmail/status`, `/gmail/inbox`, `/gmail/inbox/refresh`, `/gmail/inbox/{id}/preview|approve` | F1 briefing inbox |
 | GET | `/risk`, `/accounts/{id}/risk` | F2 |
 | POST | `/meetings/upload`, `/extract`, `/save` | F3 |
 | GET | `/accounts/{id}/meetings` | F3 |

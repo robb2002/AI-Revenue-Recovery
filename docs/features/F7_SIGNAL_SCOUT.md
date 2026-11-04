@@ -95,12 +95,19 @@ hunches.”
 - **Mode B — Manual target:** name + HTTPS official URL; validate URL; store as scout target
   (`source=manual`).  
 - **Target card:** name, web URL, last scanned (or Never), **Scan now**.  
-- **Scan now:** async job (`202` + poll); fetch **allowlisted / discovered official pages only**
-  (newsroom, announcements, leadership, budget — align with existing source-page types); respect
-  `robots.txt`; cap pages per scan (e.g. 8).  
-- **Signal extraction** into the **seven types** (closed taxonomy — see §5.3).  
+- **Scan now:** async job (`202` + poll); **two-layer pipeline** (same shape as prior SIS
+  event design, clean-room): fetch official `website_url` homepage → rank **same-domain**
+  links → AI (or rules fallback) selects **page hubs** (§5.3a) → validate (https, same
+  registrable domain/parent, robots, same-host redirects) → fetch → AI extract into the
+  **seven signal types** (§5.3) with snippet-on-page check → correlate ≥2 → rules score
+  (procurement relevance, related signal strength, EdTech relevance, recency, source
+  reliability) → optional AI explain.  
+- **Page hubs:** discovered live from the target homepage — **not** a hand-curated URL list.
+  For `news` hubs, follow up to **3** same-domain article links after robots check.
+  Cap: ≤8 hubs + ≤3 news children, **total ≤12 pages** per scan. No open web search.  
+- **Signal extraction** into the **seven types** (closed taxonomy — see §5.3). Hubs ≠ types.  
 - **Validation:** every signal needs at least one evidence item (URL, date or `unavailable`,
-  verbatim snippet present on fetched page).  
+  verbatim snippet present on fetched page). Page failures never invent signals.  
 - **Correlation → potential opportunity** when ≥2 related validated signals (or documented
   strong single procurement-type exception — **default: require ≥2** for hackathon honesty).  
 - **Hybrid score 0–100** (rules); AI explains only.  
@@ -108,8 +115,8 @@ hunches.”
   Illustrative CRM labels.  
 - **Premium Hybrid:** amber = opportunity attention; indigo = AI explain; navy = Scan now;
   green = scan completed; red = scan failed (hard error only).  
-- Demo fallback: if live fetch fails, optional **cached fixture scan** for 1–2 hero institutions
-  (visibly labelled “Cached demo scan — not live”).
+- Discovered pages are **upserted into `signal_scout_pages`** keyed by university `target_id`
+  (+ `account_id` when CRM-linked). No JSON fixture files.
 
 ### 4.2 Out of scope (do not build in F7)
 
@@ -153,24 +160,68 @@ Keep deal CRM in `crm_master`. Persist scout runs separately (same pattern as `k
 | Table | Purpose |
 |---|---|
 | `signal_scout_targets` | `target_id`, `account_id` nullable, `name`, `website_url`, `source` (`crm`\|`manual`), `last_scanned_at` |
-| `signal_scout_scans` | `scan_id`, `target_id`, `status` (`queued`\|`running`\|`completed`\|`failed`), stages, page outcomes, error summary, `started_at`, `finished_at`, `mode` (`live`\|`fixture`) |
+| `signal_scout_scans` | `scan_id`, `target_id`, `status` (`queued`\|`running`\|`completed`\|`failed`), stages, page outcomes, error summary, `started_at`, `finished_at`, `mode` (`live`) |
+| `signal_scout_pages` | Discovered pages per university target: `url`, `page_category`, `status`, `account_id`, `scan_id` (unique `target_id`+`url`) |
 | `signal_scout_signals` | signal rows + type, status, evidence jsonb, `scan_id` |
 | `signal_scout_opportunities` | opportunity rows + score, factors, signal ids, explanation |
+
+No per-account JSON fixture files. Pages live in `signal_scout_pages` after Scan now.
 
 If event time is too short for migrations: keep last scan payload as jsonb on
 `signal_scout_targets` only — document the tradeoff; prefer tables above.
 
-### 5.3 Signal types (closed — same taxonomy as SIS concept)
+### 5.3a Page hub categories (discovery — where we look)
 
-1. `procurement`  
-2. `technology_initiative`  
-3. `leadership_change`  
-4. `funding_budget`  
-5. `strategic_announcement`  
-6. `competitor_vendor`  
-7. `contract_renewal`  
+Closed set of **nine** hub categories. These are **not** signal types.
+
+| Hub category | Typical pages |
+|---|---|
+| `procurement` | Purchasing / RFP / bid boards |
+| `technology` | IT / digital / modernization |
+| `digital_learning` | LMS / online learning / teaching tech |
+| `assessment` | Assessment / outcomes / testing |
+| `funding` | Grants / budget / appropriations |
+| `leadership` | Cabinet / CIO / leadership bios & news |
+| `strategic_initiative` | Strategy / programs / initiatives |
+| `partnership` | Industry / vendor / public–private partners |
+| `news` | Newsroom hub **plus** limited same-domain linked articles |
+
+**Mapping note:** a hub may yield zero or more signals of any of the seven types. Example: a
+`news` article can be `technology_initiative` or `funding_budget`. `digital_learning` /
+`assessment` hubs commonly feed `technology_initiative` or `strategic_announcement` — they do
+**not** add eighth/ninth signal types.
+
+### 5.3 Signal types (closed — what we store)
+
+1. `procurement` — RFP / RFI / solicitation / buying notices  
+2. `technology_initiative` — IT / digital / platform / modernization  
+3. `leadership_change` — CIO / leadership / cabinet moves  
+4. `funding_budget` — grants / budget / funding  
+5. `strategic_announcement` — strategy / programs / initiatives  
+6. `competitor_vendor` — vendor adoption / partnership / competitor activity  
+7. `contract_renewal` — contract / renewal / agreement activity  
 
 No eighth type at runtime.
+
+### 5.3b Page validation (before fetch)
+
+Every candidate URL must pass:
+
+1. **HTTPS** only — reject shorteners and unrelated blogs.  
+2. **Same registrable domain** as the target `website_url` (subdomains allowed, e.g.
+   `news.asu.edu` under `asu.edu`).  
+3. **Same parent host family** — news child links may not jump to third-party domains.  
+4. **robots.txt** — disallowed → `skipped_robots`, no fetch, no signal.  
+5. Caps as in §4.1.
+
+`page_outcomes` item shape:
+
+| Field | Values |
+|---|---|
+| `url` | Absolute HTTPS URL |
+| `page_category` | One of the nine hubs in §5.3a |
+| `status` | `ok` \| `failed` \| `skipped_robots` \| `domain_mismatch` |
+| `title` | Human label or fetch note |
 
 ### 5.4 Demo targets
 
@@ -190,8 +241,12 @@ No eighth type at runtime.
 ```
 api/routes/f7_signal_scout.py
 services/f7_signal_scout.py    # targets, search, assemble card
-services/f7_scan.py            # orchestrate fetch → extract → validate
-services/f7_opportunity.py     # correlate, score, explain
+services/f7_homepage_links.py  # same-domain link rank + category guess
+services/f7_page_validate.py   # https, same-domain/parent, robots
+services/f7_discovery.py       # homepage → AI/rules hubs → fetch + news articles
+services/f7_signal_extract.py  # AI extract 7 types; snippet must be on page
+services/f7_scan.py            # orchestrate live discovery; persist pages to DB
+services/f7_opportunity.py     # correlate, rules score, explain
 ```
 
 ### 6.2 Pipeline
@@ -199,12 +254,18 @@ services/f7_opportunity.py     # correlate, score, explain
 ```
 Select/Add target
   → POST scan (202 + scan_id)
-  → queued/running: discover/validate pages → fetch → extract signals
-  → validate evidence (snippet on page)
-  → correlate → create/update potential opportunities + rules score
-  → optional AI explanation of score
+  → resolve_hubs (fetch website_url → same-domain candidates → AI/rules pick hubs)
+  → validate_pages (https, same domain/parent, robots, same-host redirect)
+  → fetch (ok hubs + capped news articles)
+  → extract (seven signal types; snippet on page)
+  → validate_evidence
+  → correlate (≥2) → rules score 0–100
+       (procurement_relevance, related_signal_strength, assessment_edtech_relevance,
+        recency, source_reliability)
+  → optional AI explanation of score (never changes the number)
   → completed | failed
-UI polls GET scan until terminal
+  → upsert signal_scout_pages for this university target
+UI polls GET scan until terminal; page_outcomes + stored pages show hub coverage
 ```
 
 ### 6.3 API
@@ -269,14 +330,14 @@ Nav: **Signal Scout** icon `Radar` (or `ScanSearch`). Amber emphasis for opportu
 ### 7.3 States
 
 Empty search, invalid URL, scan running, scan failed (show per-page outcomes), no signals found
-(honest empty), fixture mode badge, AI explain unavailable (score still shows).
+(honest empty), AI explain unavailable (score still shows).
 
 ---
 
 ## 8. End-to-end scenarios
 
 1. Search “Arizona State” → open ACC-0178 card → Scan now → signals + ≥1 potential opportunity
-   **or** honest empty/fixture.  
+   **or** honest empty.  
 2. Add manual target with official newsroom URL → scan → citations open in new tab.  
 3. Second Scan now while running → `409 SCAN_IN_PROGRESS`.  
 4. Robots-blocked page → recorded skipped; no fake signal.  
@@ -345,3 +406,6 @@ Empty search, invalid URL, scan running, scan failed (show per-page outcomes), n
 | Date | Change |
 |---|---|
 | 2026-11-04 | Initial F7 Signal Scout PRD: real pre-RFP sales problem, CRM/Add target, Scan now, signals, potential opportunities; stretch after F1–F6; clean-room vs SIS |
+| 2026-11-04 | Two-layer pipeline: 9 page hubs vs 7 signal types; same-domain/parent + robots validation; page_outcomes shape; scan stages |
+| 2026-11-04 | Live discovery from website_url (homepage links + AI); SIS-shaped score factors |
+| 2026-11-04 | Removed JSON fixtures; store discovered pages in `signal_scout_pages` per university target |

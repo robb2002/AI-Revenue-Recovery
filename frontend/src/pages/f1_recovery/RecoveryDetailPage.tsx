@@ -3,13 +3,6 @@ import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiRequest } from '../../api/client'
 import { FictionalBadge } from '../../components/FictionalBadge'
-import {
-  clearGmailToken,
-  connectGmail,
-  getValidGmailAccessToken,
-  isGmailConfigured,
-  peekGmailAccessToken,
-} from '../../lib/gmailAuth'
 
 type RecoveryDetail = {
   account_id: string
@@ -37,28 +30,7 @@ type RecoveryDetail = {
     recommended_action: { text: string }
   }
   draft: { subject: string | null; body: string | null; state: string }
-  gmail_thread: GmailThread | null
   as_of_date: string
-}
-
-type GmailThread = {
-  source: string
-  mailbox?: string
-  scanned_count?: number
-  match_mode?: string
-  notice?: string
-  new_messages: GmailMsg[]
-  previous_messages: GmailMsg[]
-}
-
-type GmailMsg = {
-  gmail_message_id: string
-  date: string
-  from: string
-  to: string
-  subject: string
-  snippet: string
-  body?: string
 }
 
 type CrmPreview = {
@@ -83,8 +55,6 @@ export function RecoveryDetailPage() {
   const [body, setBody] = useState<string | null>(null)
   const [preview, setPreview] = useState<CrmPreview | null>(null)
   const [toast, setToast] = useState<string | null>(null)
-  const [gmailConnected, setGmailConnected] = useState(() => Boolean(peekGmailAccessToken()))
-  const [syncedThread, setSyncedThread] = useState<GmailThread | null>(null)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['recovery', accountId],
@@ -127,53 +97,13 @@ export function RecoveryDetailPage() {
     },
   })
 
-  const connectGmailAccount = useMutation({
-    mutationFn: () => connectGmail(),
-    onSuccess: () => {
-      setGmailConnected(true)
-      setToast('Gmail connected (readonly). Click Sync Emails to load this contact’s thread.')
-    },
-    onError: (e) => setToast(e instanceof Error ? e.message : 'Gmail connect failed'),
-  })
-
-  const syncGmail = useMutation({
-    mutationFn: async () => {
-      let accessToken: string | undefined
-      if (isGmailConfigured()) {
-        try {
-          accessToken = await getValidGmailAccessToken()
-          setGmailConnected(true)
-        } catch {
-          // Fall through — backend may return fixtures when DEMO_GMAIL_FIXTURES=true.
-          accessToken = undefined
-        }
-      }
-      return apiRequest<GmailThread>(`/api/v1/accounts/${accountId}/gmail/sync`, {
-        method: 'POST',
-        body: JSON.stringify({ access_token: accessToken }),
-      })
-    },
-    onSuccess: (thread) => {
-      setSyncedThread(thread)
-      void refetch()
-      if (thread.source === 'gmail') {
-        const count = thread.new_messages.length + thread.previous_messages.length
-        setToast(
-          thread.notice ||
-            `Synced ${count} messages` +
-              (thread.mailbox ? ` from ${thread.mailbox}` : '') +
-              '. Nothing sent.',
-        )
-      } else {
-        setToast('Gmail thread loaded from demo fixtures (connect Gmail for live mail).')
-      }
-    },
-    onError: (e) => setToast(e instanceof Error ? e.message : 'Gmail sync failed'),
-  })
-
   const loadPreview = useMutation({
-    mutationFn: () => apiRequest<CrmPreview>(`/api/v1/accounts/${accountId}/crm-log/preview`),
+    mutationFn: () =>
+      apiRequest<CrmPreview>(
+        `/api/v1/accounts/${accountId}/crm-log/preview?source=draft`,
+      ),
     onSuccess: setPreview,
+    onError: (e) => setToast(e instanceof Error ? e.message : 'Preview failed'),
   })
 
   const confirmLog = useMutation({
@@ -186,7 +116,7 @@ export function RecoveryDetailPage() {
       setPreview(null)
       void refetch()
       void qc.invalidateQueries({ queryKey: ['recovery'] })
-      setToast('CRM updated. Deal still not marked recovered.')
+      setToast('CRM updated from draft. Deal still not marked recovered. Nothing was emailed.')
     },
   })
 
@@ -208,8 +138,6 @@ export function RecoveryDetailPage() {
     return <p className="text-red-600">{error instanceof Error ? error.message : 'Not found'}</p>
   }
 
-  const thread = syncedThread ?? data.gmail_thread
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -230,6 +158,11 @@ export function RecoveryDetailPage() {
           {toast}
         </div>
       )}
+
+      <p className="rounded-md border border-navy-200 bg-navy-50 px-3 py-2 text-xs text-navy-800">
+        Inbox email leads live on the Briefing page (Gmail → match CRM → approve). This page is
+        recovery evidence + re-engagement draft only.
+      </p>
 
       <section className="grid gap-4 rounded-lg border border-neutral-200 bg-white p-4 md:grid-cols-3">
         <div>
@@ -302,74 +235,6 @@ export function RecoveryDetailPage() {
         </section>
       )}
 
-      <section className="rounded-lg border border-neutral-200 bg-white p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="font-semibold text-neutral-900">Gmail thread</p>
-            <p className="text-xs text-neutral-500">
-              Read-only sync matched to {data.contact_email || 'contact_email'}. Does not send mail.
-              {gmailConnected ? ' · Gmail connected' : ''}
-              {!isGmailConfigured() ? ' · Set VITE_GOOGLE_CLIENT_ID for live sync' : ''}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {isGmailConfigured() && (
-              <button
-                type="button"
-                onClick={() => connectGmailAccount.mutate()}
-                disabled={connectGmailAccount.isPending || syncGmail.isPending}
-                className="rounded-md border border-navy-600 bg-navy-50 px-3 py-2 text-sm font-medium text-navy-700 disabled:opacity-50"
-              >
-                {connectGmailAccount.isPending
-                  ? 'Connecting…'
-                  : gmailConnected
-                    ? 'Reconnect Gmail'
-                    : 'Connect Gmail'}
-              </button>
-            )}
-            {gmailConnected && (
-              <button
-                type="button"
-                onClick={() => {
-                  clearGmailToken()
-                  setGmailConnected(false)
-                  setToast('Gmail disconnected for this browser session.')
-                }}
-                className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700"
-              >
-                Disconnect
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => syncGmail.mutate()}
-              disabled={syncGmail.isPending || !data.contact_email}
-              title={!data.contact_email ? 'No contact_email on this account' : undefined}
-              className="rounded-md bg-navy-600 px-3 py-2 text-sm font-medium text-white hover:bg-navy-700 disabled:opacity-50"
-            >
-              {syncGmail.isPending ? 'Syncing…' : 'Sync Emails'}
-            </button>
-          </div>
-        </div>
-        {thread?.source === 'fixture' && (
-          <p className="mt-2 text-xs font-medium text-amber-700">Demo thread (fixture)</p>
-        )}
-        {thread?.source === 'gmail' && (
-          <p className="mt-2 text-xs font-medium text-green-700">
-            Live Gmail · scanned {thread.scanned_count ?? 0}
-            {thread.mailbox ? ` · ${thread.mailbox}` : ''}
-            {thread.match_mode === 'recent_inbox' ? ' · recent inbox fallback' : ''}
-          </p>
-        )}
-        {thread?.notice && (
-          <p className="mt-2 text-xs text-amber-800">{thread.notice}</p>
-        )}
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <MessageList title="New" messages={thread?.new_messages ?? []} />
-          <MessageList title="Previous" messages={thread?.previous_messages ?? []} />
-        </div>
-      </section>
-
       <section className="rounded-lg border border-indigo-200 bg-indigo-50/30 p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -383,7 +248,7 @@ export function RecoveryDetailPage() {
             onClick={() => generate.mutate()}
             className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
           >
-            {generate.isPending ? 'Generating…' : 'Generate / load sample'}
+            {generate.isPending ? 'Generating…' : 'Generate draft'}
           </button>
         </div>
         <label className="mt-4 block text-xs font-medium text-neutral-500">Subject</label>
@@ -411,12 +276,16 @@ export function RecoveryDetailPage() {
             onClick={() => loadPreview.mutate()}
             className="rounded-md bg-navy-600 px-3 py-2 text-sm font-medium text-white hover:bg-navy-700"
           >
-            Log to CRM
+            Log draft to CRM
           </button>
           <button
             type="button"
             onClick={() => {
-              if (window.confirm('Reopen this opportunity? This does not mean revenue was recovered.')) {
+              if (
+                window.confirm(
+                  'Reopen this opportunity? This does not mean revenue was recovered.',
+                )
+              ) {
                 reopen.mutate()
               }
             }}
@@ -432,7 +301,7 @@ export function RecoveryDetailPage() {
           <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-lg bg-white p-5 shadow-xl">
             <h3 className="text-lg font-semibold">Review CRM updates before logging</h3>
             <p className="mt-2 text-sm text-neutral-600">{preview.summary}</p>
-            <p className="mt-3 text-sm font-medium">Email to log</p>
+            <p className="mt-3 text-sm font-medium">Activity to append</p>
             <p className="text-sm text-neutral-700">{preview.proposed_activity.description}</p>
             <p className="mt-3 text-sm font-medium">Will update</p>
             <ul className="mt-1 list-inside list-disc text-sm text-neutral-700">
@@ -461,59 +330,11 @@ export function RecoveryDetailPage() {
                 className="rounded-md bg-navy-600 px-3 py-2 text-sm font-medium text-white"
                 onClick={() => confirmLog.mutate()}
               >
-                {confirmLog.isPending ? 'Saving…' : 'Confirm sync'}
+                {confirmLog.isPending ? 'Saving…' : 'Confirm CRM update'}
               </button>
             </div>
           </div>
         </div>
-      )}
-    </div>
-  )
-}
-
-function MessageBody({ snippet, body }: { snippet: string; body?: string }) {
-  // Prefer full body; fall back to snippet only if body was not returned.
-  const full = (body && body.trim().length > (snippet || '').trim().length ? body : body || snippet || '').trim()
-  const [expanded, setExpanded] = useState(true)
-  const previewLimit = 220
-  const needsMore = full.length > previewLimit
-  const shown = expanded || !needsMore ? full : `${full.slice(0, previewLimit).trimEnd()}…`
-
-  return (
-    <div className="mt-1">
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-neutral-700">{shown}</p>
-      {needsMore && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-xs font-medium text-navy-600 hover:underline"
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </div>
-  )
-}
-
-function MessageList({ title, messages }: { title: string; messages: GmailMsg[] }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold tracking-wide text-neutral-500 uppercase">{title}</p>
-      {messages.length === 0 ? (
-        <p className="mt-2 text-sm text-neutral-400">No messages</p>
-      ) : (
-        <ul className="mt-2 space-y-2">
-          {messages.map((m) => (
-            <li key={m.gmail_message_id} className="rounded-md border border-neutral-200 p-3">
-              <p className="text-sm font-medium text-neutral-900">{m.subject}</p>
-              <p className="text-xs text-neutral-500">
-                {m.from} → {m.to} · {new Date(m.date).toLocaleDateString()}
-              </p>
-              <MessageBody snippet={m.snippet} body={m.body} />
-              <p className="mt-1 text-[11px] text-neutral-400">Gmail · {m.gmail_message_id}</p>
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   )

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.api.deps import CurrentUserDep, SessionDep
+from app.services import f1_gmail as gmail
 from app.services import f1_recovery as svc
 
 router = APIRouter(tags=["f1-recovery"])
@@ -18,8 +19,12 @@ class ConfirmBody(BaseModel):
     gmail_message_id: str | None = None
 
 
-class GmailSyncBody(BaseModel):
-    access_token: str | None = None
+class InboxRefreshBody(BaseModel):
+    access_token: str
+
+
+class InboxApproveBody(BaseModel):
+    confirm: bool = False
 
 
 @router.get("/recovery")
@@ -72,67 +77,62 @@ async def reject_draft(
 
 @router.get("/gmail/status")
 async def gmail_status(_user: CurrentUserDep) -> dict:
-    from app.core.config import get_settings
-
-    settings = get_settings()
-    return {
-        "connected": False,
-        "mode": "token_client",
-        "fixtures_fallback": settings.demo_gmail_fixtures,
-        "message": (
-            "Connect Gmail in the browser (readonly), then Sync. "
-            "Without a token, demo fixtures are returned when fixtures fallback is on."
-        ),
-    }
+    return gmail.mailbox_status()
 
 
-@router.post("/accounts/{account_id}/gmail/sync")
-async def gmail_sync(
-    account_id: str,
+@router.post("/gmail/inbox/refresh")
+async def gmail_inbox_refresh(
+    body: InboxRefreshBody, _user: CurrentUserDep, session: SessionDep
+) -> dict:
+    return await gmail.refresh_inbox(session, body.access_token)
+
+
+@router.get("/gmail/inbox")
+async def gmail_inbox(_user: CurrentUserDep) -> dict:
+    return gmail.get_cached_inbox()
+
+
+@router.get("/gmail/inbox/{gmail_message_id}/preview")
+async def gmail_inbox_preview(
+    gmail_message_id: str, _user: CurrentUserDep, session: SessionDep
+) -> dict:
+    return await gmail.preview_inbox_crm(session, gmail_message_id)
+
+
+@router.post("/gmail/inbox/{gmail_message_id}/approve")
+async def gmail_inbox_approve(
+    gmail_message_id: str,
+    body: InboxApproveBody,
     _user: CurrentUserDep,
     session: SessionDep,
-    body: GmailSyncBody = GmailSyncBody(),
 ) -> dict:
-    from app.core.config import get_settings
-
-    settings = get_settings()
-    return await svc.sync_gmail_live(
-        session,
-        account_id=account_id,
-        access_token=body.access_token,
-        allow_fixtures=settings.demo_gmail_fixtures,
-    )
-
-
-@router.get("/accounts/{account_id}/gmail/thread")
-async def gmail_thread(
-    account_id: str, _user: CurrentUserDep, session: SessionDep
-) -> dict:
-    detail = await svc.get_recovery_detail(session, account_id)
-    cached = detail.get("gmail_thread")
-    if cached:
-        return cached
-    return {
-        "account_id": account_id,
-        "source": "none",
-        "new_messages": [],
-        "previous_messages": [],
-        "message": "Click Sync Gmail to load the demo thread fixtures.",
-    }
+    return await gmail.confirm_inbox_crm(session, gmail_message_id, body.confirm)
 
 
 @router.get("/accounts/{account_id}/crm-log/preview")
 async def crm_log_preview(
-    account_id: str, _user: CurrentUserDep, session: SessionDep
+    account_id: str,
+    _user: CurrentUserDep,
+    session: SessionDep,
+    source: str = Query("draft"),
+    gmail_message_id: str | None = Query(None),
 ) -> dict:
-    return await svc.preview_crm_log(session, account_id)
+    return await svc.preview_crm_log(
+        session, account_id, source=source, gmail_message_id=gmail_message_id
+    )
 
 
 @router.post("/accounts/{account_id}/crm-log/confirm")
 async def crm_log_confirm(
     account_id: str, body: ConfirmBody, _user: CurrentUserDep, session: SessionDep
 ) -> dict:
-    return await svc.confirm_crm_log(session, account_id, body.confirm)
+    return await svc.confirm_crm_log(
+        session,
+        account_id,
+        body.confirm,
+        source=body.source,
+        gmail_message_id=body.gmail_message_id,
+    )
 
 
 @router.post("/accounts/{account_id}/reopen")

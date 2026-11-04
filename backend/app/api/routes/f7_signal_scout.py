@@ -45,14 +45,13 @@ async def get_target(target_id: str, _user: CurrentUserDep, session: SessionDep)
 @router.post("/targets/{target_id}/scan", status_code=202)
 async def start_scan(target_id: str, _user: CurrentUserDep, session: SessionDep):
     result = await scan_svc.start_scan(session, target_id)
-    # Pipeline completes inside start_scan for reliable demo; still return 202
-    final = await scan_svc.get_scan(session, result["scan_id"])
+    # Return immediately — pipeline runs in background; UI polls stages
     return JSONResponse(
         status_code=202,
         content={
             "scan_id": result["scan_id"],
             "target_id": target_id,
-            "status": final.get("status") or "completed",
+            "status": result.get("status") or "queued",
             "message": result.get("message"),
         },
     )
@@ -61,6 +60,13 @@ async def start_scan(target_id: str, _user: CurrentUserDep, session: SessionDep)
 @router.get("/scans/{scan_id}")
 async def get_scan(scan_id: str, _user: CurrentUserDep, session: SessionDep) -> dict:
     return await scan_svc.get_scan(session, scan_id)
+
+
+@router.get("/targets/{target_id}/pages")
+async def list_pages(target_id: str, _user: CurrentUserDep, session: SessionDep) -> dict:
+    await svc.get_target(session, target_id)
+    items = await svc.list_target_pages(session, target_id)
+    return {"items": items, "count": len(items)}
 
 
 @router.get("/targets/{target_id}/signals")

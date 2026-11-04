@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router'
 import { AppShell } from '../components/AppShell'
+import { env } from '../lib/env'
 import { BriefingPage } from '../pages/BriefingPage'
-import { DataStatusPage } from '../pages/DataStatusPage'
 import { LoginPage } from '../pages/LoginPage'
 import { RecoveryDetailPage } from '../pages/f1_recovery/RecoveryDetailPage'
 import { RecoveryListPage } from '../pages/f1_recovery/RecoveryListPage'
@@ -35,10 +35,13 @@ export function AppRoutes() {
           <Route path="drafts" element={<DraftsPage />} />
           <Route path="accounts/:accountId/handoff" element={<HandoffPage />} />
           <Route path="handoff" element={<HandoffPage />} />
-          <Route path="signal-scout" element={<SignalScoutHomePage />} />
-          <Route path="signal-scout/:targetId" element={<SignalScoutTargetPage />} />
+          {env.signalScoutFeature ? (
+            <>
+              <Route path="signal-scout" element={<SignalScoutHomePage />} />
+              <Route path="signal-scout/:targetId" element={<SignalScoutTargetPage />} />
+            </>
+          ) : null}
           <Route path="knowledge" element={<KnowledgePage />} />
-          <Route path="data" element={<DataStatusPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

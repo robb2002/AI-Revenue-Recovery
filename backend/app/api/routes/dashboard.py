@@ -22,6 +22,21 @@ async def dashboard(_user: CurrentUserDep, session: SessionDep) -> dict:
               count(*) filter (
                 where deal_status in ('open','stalled') and risk_category = 'high'
               ) as high_risk,
+              count(*) filter (
+                where deal_status in ('open','stalled') and risk_category = 'medium'
+              ) as medium_risk,
+              count(*) filter (
+                where deal_status in ('open','stalled') and risk_category = 'low'
+              ) as low_risk,
+              coalesce(sum(deal_value) filter (
+                where deal_status in ('open','stalled') and risk_category = 'high'
+              ), 0) as high_risk_usd,
+              coalesce(sum(deal_value) filter (
+                where deal_status in ('open','stalled') and risk_category = 'medium'
+              ), 0) as medium_risk_usd,
+              coalesce(sum(deal_value) filter (
+                where deal_status in ('open','stalled') and risk_category = 'low'
+              ), 0) as low_risk_usd,
               count(*) filter (where blocker_detected is true and coalesce(blocker_status,'') <> 'resolved') as open_blockers,
               count(*) filter (where deal_status = 'won' and coalesce(handoff_required, false)) as handoffs,
               max(as_of_date)::text as as_of
@@ -54,6 +69,7 @@ async def dashboard(_user: CurrentUserDep, session: SessionDep) -> dict:
             "recommended_action": r["recommended_next_action"] or "Review deal risk evidence",
             "priority": "high",
             "feature_key": "risk_prioritizer",
+            "score": int(r["revenue_risk_score"] or 0),
             "href": f"/risk/{r['account_id']}",
         }
         for r in briefing_rows
@@ -66,6 +82,11 @@ async def dashboard(_user: CurrentUserDep, session: SessionDep) -> dict:
         "at_risk_note": "At-risk value is not lost revenue.",
         "recovery_eligible_count": int(row.recovery_eligible or 0),
         "high_risk_count": int(row.high_risk or 0),
+        "medium_risk_count": int(row.medium_risk or 0),
+        "low_risk_count": int(row.low_risk or 0),
+        "high_risk_usd": float(row.high_risk_usd or 0),
+        "medium_risk_usd": float(row.medium_risk_usd or 0),
+        "low_risk_usd": float(row.low_risk_usd or 0),
         "open_blocker_count": int(row.open_blockers or 0),
         "won_pending_handoff_count": int(row.handoffs or 0),
         "briefing": briefing,

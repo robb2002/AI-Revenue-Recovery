@@ -473,11 +473,29 @@ async def preview_save(
         "content_hash": content_hash,
     }
 
+    field_destinations = [
+        {"extraction_key": "meeting_summary", "crm_field": "uploaded_meetings[].meeting_summary"},
+        {"extraction_key": "customer_requirements", "crm_field": "uploaded_meetings[].customer_requirements"},
+        {"extraction_key": "budget_discussion", "crm_field": "uploaded_meetings[].budget_discussion"},
+        {"extraction_key": "pain_points", "crm_field": "uploaded_meetings[].pain_points"},
+        {"extraction_key": "objections", "crm_field": "uploaded_meetings[].objections"},
+        {"extraction_key": "stakeholders", "crm_field": "uploaded_meetings[].stakeholders"},
+        {"extraction_key": "competitor_mentions", "crm_field": "uploaded_meetings[].competitor_mentions"},
+        {"extraction_key": "decision_criteria", "crm_field": "uploaded_meetings[].decision_criteria"},
+        {"extraction_key": "customer_commitments", "crm_field": "uploaded_meetings[].customer_commitments"},
+        {"extraction_key": "action_items", "crm_field": "uploaded_meetings[].action_items"},
+        {"extraction_key": "deadlines", "crm_field": "uploaded_meetings[].deadlines"},
+        {"extraction_key": "recommended_next_steps", "crm_field": "uploaded_meetings[].recommended_next_steps"},
+        {"extraction_key": "(full extraction)", "crm_field": "uploaded_meetings[].extraction_detail"},
+        {"extraction_key": "(transcript)", "crm_field": "uploaded_meetings[].transcript"},
+    ]
+
     return {
         "account_id": account_id,
         "account_name": row["account_name"],
         "requires_confirmation": True,
         "proposed_uploaded_meeting": proposed,
+        "field_destinations": field_destinations,
         "current_uploaded_count": len(existing),
         "will_not_change": [
             "pre-generated meeting_transcript and meeting_* columns",
@@ -485,8 +503,8 @@ async def preview_save(
             "No mark won or recovered",
         ],
         "summary": (
-            f"Append 1 meeting to uploaded_meetings "
-            f"(current count {len(existing)} -> {len(existing) + 1})."
+            f"Append 1 meeting object to uploaded_meetings on {row['account_name']} "
+            f"({account_id}) — count {len(existing)} → {len(existing) + 1}."
         ),
         "data_label": "Fictional demo data",
     }
@@ -617,6 +635,24 @@ async def get_meetings(session: AsyncSession, account_id: str) -> dict[str, Any]
     if not isinstance(uploads, list):
         uploads = []
 
+    # Trim heavy transcript blobs for list load (UI shows preview; full text stays in DB)
+    slim_uploads: list[dict[str, Any]] = []
+    for u in uploads:
+        if not isinstance(u, dict):
+            continue
+        item = dict(u)
+        tr = item.get("transcript")
+        if isinstance(tr, str) and len(tr) > 1200:
+            item["transcript"] = tr[:1200] + "…"
+            item["transcript_truncated"] = True
+        # Drop nested extraction_detail from list payload (large); keep flat fields
+        item.pop("extraction_detail", None)
+        slim_uploads.append(item)
+
+    pre_tr = row["meeting_transcript"] or ""
+    pre_tr_s = pre_tr if not isinstance(pre_tr, str) else pre_tr
+    pre_preview = pre_tr_s[:2500] + ("…" if isinstance(pre_tr_s, str) and len(pre_tr_s) > 2500 else "")
+
     return {
         "account_id": row["account_id"],
         "account_name": row["account_name"],
@@ -627,7 +663,8 @@ async def get_meetings(session: AsyncSession, account_id: str) -> dict[str, Any]
             "meeting_date": row["meeting_date"],
             "meeting_type": row["meeting_type"],
             "meeting_summary": row["meeting_summary"],
-            "meeting_transcript": row["meeting_transcript"],
+            "meeting_transcript": pre_preview,
+            "transcript_truncated": isinstance(pre_tr_s, str) and len(pre_tr_s) > 2500,
             "customer_requirements": _parse_jsonb(row["customer_requirements"]),
             "pain_points": _parse_jsonb(row["pain_points"]),
             "budget_discussion": row["budget_discussion"],
@@ -639,7 +676,7 @@ async def get_meetings(session: AsyncSession, account_id: str) -> dict[str, Any]
             "customer_commitments": _parse_jsonb(row["customer_commitments"]),
             "meeting_insights": _parse_jsonb(row["meeting_insights"]),
         },
-        "uploaded_meetings": uploads,
+        "uploaded_meetings": slim_uploads,
         "as_of_date": row["as_of_date"],
         "data_label": "Fictional demo data",
         "sample_file": "ACC-0181_followup_call_2026-10-28.txt",

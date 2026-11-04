@@ -1,143 +1,117 @@
 import { env } from './env'
-import { loadGoogleIdentityScript } from './loadGoogleScript'
 
-const TOKEN_STORAGE_KEY = 'rr_gmail_access_token'
-const TOKEN_EXPIRY_STORAGE_KEY = 'rr_gmail_access_token_expires_at'
-const SCOPES_STORAGE_KEY = 'rr_gmail_granted_scopes'
-const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly openid email profile'
+const TOKEN_KEY = 'lumora_gmail_access_token'
+const TOKEN_EXP_KEY = 'lumora_gmail_access_token_exp'
 
-type TokenClientResponse = {
-  access_token?: string
-  expires_in?: number
-  scope?: string
-  error?: string
-  error_description?: string
+type TokenClient = {
+  requestAccessToken: (opts?: { prompt?: string }) => void
 }
 
 declare global {
   interface Window {
     google?: {
-      accounts?: {
-        oauth2?: {
-          initTokenClient: (config: {
+      accounts: {
+        oauth2: {
+          initTokenClient: (cfg: {
             client_id: string
             scope: string
             hint?: string
-            callback: (response: TokenClientResponse) => void
-            error_callback?: (error: { message?: string; type?: string }) => void
-          }) => { requestAccessToken: (override?: { prompt?: string }) => void }
-          revoke: (token: string, done: () => void) => void
+            callback: (resp: {
+              access_token?: string
+              expires_in?: number
+              error?: string
+            }) => void
+          }) => TokenClient
         }
       }
     }
   }
 }
 
-function hasGmailScope(scopeString: string | null | undefined): boolean {
-  if (!scopeString) return false
-  return scopeString.split(/\s+/).includes(GMAIL_READONLY_SCOPE)
+let scriptPromise: Promise<void> | null = null
+let inflight: Promise<string> | null = null
+
+function loadGis(): Promise<void> {
+  if (window.google?.accounts?.oauth2) return Promise.resolve()
+  if (scriptPromise) return scriptPromise
+  scriptPromise = new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = 'https://accounts.google.com/gsi/client'
+    s.async = true
+    s.onload = () => resolve()
+    s.onerror = () => reject(new Error('Could not load Google Identity Services'))
+    document.head.appendChild(s)
+  })
+  return scriptPromise
 }
 
-function readStoredAuth(): { token: string | null; expiresAt: number } {
-  const token = sessionStorage.getItem(TOKEN_STORAGE_KEY)
-  const expiresAtRaw = sessionStorage.getItem(TOKEN_EXPIRY_STORAGE_KEY)
-  const scopes = sessionStorage.getItem(SCOPES_STORAGE_KEY) ?? ''
-  const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : 0
-
-  if (!token || !expiresAt || Date.now() >= expiresAt || !hasGmailScope(scopes)) {
-    sessionStorage.removeItem(TOKEN_STORAGE_KEY)
-    sessionStorage.removeItem(TOKEN_EXPIRY_STORAGE_KEY)
-    sessionStorage.removeItem(SCOPES_STORAGE_KEY)
-    return { token: null, expiresAt: 0 }
+function readCachedToken(): string | null {
+  try {
+    const token = sessionStorage.getItem(TOKEN_KEY)
+    const exp = Number(sessionStorage.getItem(TOKEN_EXP_KEY) || 0)
+    // Refresh 2 minutes before expiry
+    if (token && Date.now() < exp - 120_000) return token
+  } catch {
+    /* ignore */
   }
-  return { token, expiresAt }
+  return null
 }
 
-function persistToken(token: string, expiresInSeconds?: number, scopeString?: string) {
-  const lifetimeMs = Math.max((expiresInSeconds ?? 3600) - 60, 60) * 1000
-  const nextExpiry = Date.now() + lifetimeMs
-  const scopes = scopeString ?? GMAIL_READONLY_SCOPE
-  sessionStorage.setItem(TOKEN_STORAGE_KEY, token)
-  sessionStorage.setItem(TOKEN_EXPIRY_STORAGE_KEY, String(nextExpiry))
-  sessionStorage.setItem(SCOPES_STORAGE_KEY, scopes)
-}
-
-export function clearGmailToken() {
-  const stored = sessionStorage.getItem(TOKEN_STORAGE_KEY)
-  if (stored && window.google?.accounts?.oauth2) {
-    window.google.accounts.oauth2.revoke(stored, () => undefined)
+function writeCachedToken(token: string, expiresInSec?: number) {
+  try {
+    const ttlMs = Math.max(60, Number(expiresInSec) || 3600) * 1000
+    sessionStorage.setItem(TOKEN_KEY, token)
+    sessionStorage.setItem(TOKEN_EXP_KEY, String(Date.now() + ttlMs))
+  } catch {
+    /* ignore */
   }
-  sessionStorage.removeItem(TOKEN_STORAGE_KEY)
-  sessionStorage.removeItem(TOKEN_EXPIRY_STORAGE_KEY)
-  sessionStorage.removeItem(SCOPES_STORAGE_KEY)
 }
 
-export function isGmailConfigured(): boolean {
-  return Boolean(env.googleClientId)
+export function clearGmailAccessToken() {
+  try {
+    sessionStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_EXP_KEY)
+  } catch {
+    /* ignore */
+  }
 }
 
-export function peekGmailAccessToken(): string | null {
-  return readStoredAuth().token
-}
+/** Reuse token after first consent; popup only when missing/expired/revoked. */
+export async function requestGmailAccessToken(): Promise<string> {
+  const cached = readCachedToken()
+  if (cached) return cached
 
-export async function connectGmail(): Promise<string> {
+  if (inflight) return inflight
+
   if (!env.googleClientId) {
-    throw new Error('Missing VITE_GOOGLE_CLIENT_ID. Add it to frontend/.env and restart Vite.')
+    throw new Error('VITE_GOOGLE_CLIENT_ID is not configured')
   }
-  await loadGoogleIdentityScript()
-  return requestToken('consent')
-}
-
-export async function getValidGmailAccessToken(): Promise<string> {
-  const stored = readStoredAuth()
-  if (stored.token && Date.now() < stored.expiresAt) {
-    return stored.token
+  await loadGis()
+  if (!window.google?.accounts?.oauth2) {
+    throw new Error('Google Identity Services unavailable')
   }
-  return connectGmail()
-}
 
-function requestToken(prompt?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!window.google?.accounts?.oauth2) {
-      reject(new Error('Google Identity Services is not loaded.'))
-      return
-    }
-
-    const client = window.google.accounts.oauth2.initTokenClient({
+  inflight = new Promise<string>((resolve, reject) => {
+    const client = window.google!.accounts.oauth2.initTokenClient({
       client_id: env.googleClientId,
-      // Only the scope we need for Sync Emails (avoids extra consent-screen issues).
-      scope: GMAIL_READONLY_SCOPE,
+      scope: GMAIL_SCOPE,
       hint: env.gmailLoginHint || undefined,
-      callback: (response) => {
-        if (response.error || !response.access_token) {
-          reject(
-            new Error(
-              response.error_description || response.error || 'Google Gmail connect failed.',
-            ),
-          )
+      callback: (resp) => {
+        if (resp.error || !resp.access_token) {
+          clearGmailAccessToken()
+          reject(new Error(resp.error || 'Gmail authorization failed'))
           return
         }
-        if (!hasGmailScope(response.scope)) {
-          reject(
-            new Error(
-              'Gmail permission was not granted. Allow “View your email messages” and try again.',
-            ),
-          )
-          return
-        }
-        persistToken(response.access_token, response.expires_in, response.scope)
-        resolve(response.access_token)
-      },
-      error_callback: (error) => {
-        const detail = error.message || error.type || 'Google Gmail connect failed.'
-        reject(
-          new Error(
-            `${detail} Check Google Cloud: OAuth client type = Web application, Authorized JavaScript origins includes exactly http://localhost:5173, Gmail API enabled, and this email is a Test user.`,
-          ),
-        )
+        writeCachedToken(resp.access_token, resp.expires_in)
+        resolve(resp.access_token)
       },
     })
-
-    client.requestAccessToken(prompt ? { prompt } : undefined)
+    // First time may show consent; later calls use cached token above.
+    client.requestAccessToken({ prompt: '' })
+  }).finally(() => {
+    inflight = null
   })
+
+  return inflight
 }

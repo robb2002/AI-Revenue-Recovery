@@ -1,27 +1,32 @@
-"""F7 — Scan orchestration: fixture-first demo path + optional live page check."""
+"""F7 — Scan: homepage discover → validate → AI extract → correlate → rules score.
+
+Live discovery from the target website_url. Discovered pages are stored in
+signal_scout_pages (linked to the university target) — no JSON fixture files.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import create_engine, create_session_factory
 from app.core.config import get_settings
+from app.core.database import create_engine, create_session_factory
 from app.core.errors import AppError
+from app.services import f7_discovery as discovery
 from app.services import f7_opportunity as opp
+from app.services import f7_page_validate as pages
+from app.services import f7_signal_extract as extract
 from app.services import f7_signal_scout as scout
 
 logger = logging.getLogger("app.services.f7_scan")
-
-FIXTURE_DIR = Path(__file__).resolve().parents[2] / "data" / "signal_scout" / "fixtures"
 
 
 class ScanInProgressError(AppError):
@@ -51,9 +56,15 @@ async def get_scan(session: AsyncSession, scan_id: str) -> dict[str, Any]:
     outcomes = row["page_outcomes"]
     if isinstance(outcomes, str):
         outcomes = json.loads(outcomes)
+    normalized = []
+    for p in outcomes or []:
+        item = dict(p)
+        if "page_category" not in item and item.get("page_type"):
+            item["page_category"] = _legacy_page_type(item["page_type"])
+        normalized.append(item)
     return {
         **dict(row),
-        "page_outcomes": outcomes or [],
+        "page_outcomes": normalized,
         "started_at": row["started_at"].isoformat() if row.get("started_at") else None,
         "finished_at": row["finished_at"].isoformat() if row.get("finished_at") else None,
     }
@@ -83,17 +94,15 @@ async def start_scan(session: AsyncSession, target_id: str) -> dict[str, Any]:
             insert into signal_scout_scans (
               scan_id, target_id, status, mode, progress_pct, stage, started_at, label
             ) values (
-              :sid, :tid, 'queued', 'fixture', 0, 'queued', :started, null
+              :sid, :tid, 'queued', 'live', 0, 'queued', :started, null
             )
             """
         ),
         {"sid": scan_id, "tid": target_id, "started": now},
     )
     await session.commit()
-
-    # Run pipeline in this request for reliable demo (UI still polls)
-    await _run_scan(scan_id, target)
-
+    # Background so the UI can poll stages (detect → validate → extract → correlate → score)
+    asyncio.create_task(_run_scan(scan_id, dict(target)))
     return {
         "scan_id": scan_id,
         "target_id": target_id,
@@ -109,89 +118,93 @@ async def _run_scan(scan_id: str, target: dict[str, Any]) -> None:
     async with factory() as session:
         try:
             await _set_scan(
-                session,
-                scan_id,
-                status="running",
-                progress=20,
-                stage="loading_sources",
+                session, scan_id, status="running", progress=10, stage="resolve_hubs"
             )
 
-            fixture = _load_fixture(target.get("account_id"))
-            crm_signal = await _crm_on_file_signal(session, target)
-            live_outcome = await _try_live_fetch(target)
-
+            website = target.get("website_url") or ""
+            page_outcomes: list[dict[str, Any]] = []
             signals: list[dict[str, Any]] = []
-            pages: list[dict[str, Any]] = []
-            mode = "fixture"
-            label = "Cached demo scan — not live"
+            mode = "live"
+            label = "Live homepage discovery"
 
-            if fixture:
-                pages.extend(fixture.get("pages") or [])
-                for s in fixture.get("signals") or []:
-                    signals.append(dict(s))
-                label = fixture.get("label") or label
-            elif crm_signal:
-                signals.append(crm_signal)
-                pages.append(
-                    {
-                        "url": (crm_signal.get("evidence") or [{}])[0].get("url"),
-                        "page_type": "newsroom",
-                        "status": "ok",
-                        "title": crm_signal.get("title"),
-                    }
+            async with httpx.AsyncClient(
+                timeout=12.0,
+                follow_redirects=True,
+                headers={"User-Agent": pages.USER_AGENT},
+            ) as client:
+                fetched, outcomes, disc_label = await discovery.discover_and_fetch_pages(
+                    organization_name=target.get("name") or "Institution",
+                    website_url=website,
+                    client=client,
                 )
-                # Need ≥2 for opportunity — add strategic companion only with same URL evidence
-                if len(signals) == 1:
-                    ev = (crm_signal.get("evidence") or [None])[0]
-                    if ev:
-                        signals.append(
-                            {
-                                "signal_type": "strategic_announcement",
-                                "title": f"Public coverage: {crm_signal.get('title')}",
-                                "summary": (
-                                    "Second validated reading of the same public page for correlation. "
-                                    "Not an RFP claim."
-                                ),
-                                "evidence": [ev],
-                            }
-                        )
-                label = "CRM on-file public signal (fixture companion for correlation)"
-            else:
-                mode = "live" if live_outcome.get("ok") else "fixture"
-                if live_outcome.get("ok"):
-                    pages.append(live_outcome["page"])
-                    signals.extend(live_outcome.get("signals") or [])
-                    label = "Live fetch (snippet validated on page)"
-                else:
-                    pages.append(
-                        {
-                            "url": target.get("website_url"),
-                            "page_type": "announcements",
-                            "status": live_outcome.get("status") or "failed",
-                            "title": "Fetch outcome",
-                        }
-                    )
-                    label = "No fixture and live fetch did not yield validated signals"
+                page_outcomes = outcomes
+                label = disc_label.replace("_", " ")
 
-            if live_outcome.get("page") and fixture:
-                # Record optional live attempt alongside fixture
-                pages.append(live_outcome["page"])
-                if live_outcome.get("ok"):
-                    mode = "fixture"
-                    label = "Cached demo scan — live check also succeeded"
+                await _set_scan(
+                    session,
+                    scan_id,
+                    status="running",
+                    progress=40,
+                    stage="validate_pages",
+                    pages=page_outcomes,
+                    mode="live",
+                    label=label,
+                )
+
+                await _set_scan(
+                    session,
+                    scan_id,
+                    status="running",
+                    progress=55,
+                    stage="extract",
+                    pages=page_outcomes,
+                )
+
+                if fetched:
+                    pages_data = [
+                        {
+                            "url": p.final_url,
+                            "title": p.title,
+                            "text": p.text,
+                            "page_category": p.page_category,
+                        }
+                        for p in fetched
+                    ]
+                    signals = await extract.extract_signals_from_pages(
+                        organization_name=target.get("name") or "Institution",
+                        pages_data=pages_data,
+                    )
+                    await _set_scan(
+                        session,
+                        scan_id,
+                        status="running",
+                        progress=65,
+                        stage="extract",
+                        pages=page_outcomes,
+                        signal_count=len(signals),
+                        mode="live",
+                        label=label,
+                    )
 
             await _set_scan(
                 session,
                 scan_id,
                 status="running",
-                progress=60,
-                stage="validating_evidence",
-                mode=mode,
-                label=label,
-                pages=pages,
+                progress=70,
+                stage="validate_evidence",
+                pages=page_outcomes,
+                signal_count=len(signals),
             )
 
-            # Persist signals (replace prior for target for clean demo)
+            # Persist discovered pages on this university target (DB, not JSON files)
+            await scout.upsert_target_pages(
+                session,
+                target_id=target["target_id"],
+                account_id=target.get("account_id"),
+                scan_id=scan_id,
+                page_outcomes=page_outcomes,
+            )
+
             await session.execute(
                 text("delete from signal_scout_signals where target_id = :tid"),
                 {"tid": target["target_id"]},
@@ -204,15 +217,15 @@ async def _run_scan(scan_id: str, target: dict[str, Any]) -> None:
             stored: list[dict[str, Any]] = []
             for s in signals:
                 evidence = s.get("evidence") or []
-                if not evidence:
+                if not evidence or not any((e.get("snippet") or "").strip() for e in evidence):
                     continue
-                # Snippet required
-                if not any((e.get("snippet") or "").strip() for e in evidence):
+                stype = s.get("signal_type")
+                if stype not in pages.SIGNAL_TYPES:
                     continue
                 sid = f"sig_{uuid.uuid4().hex[:10]}"
                 row = {
                     "signal_id": sid,
-                    "signal_type": s.get("signal_type"),
+                    "signal_type": stype,
                     "title": s.get("title"),
                     "summary": s.get("summary"),
                     "evidence": evidence,
@@ -221,9 +234,11 @@ async def _run_scan(scan_id: str, target: dict[str, Any]) -> None:
                     text(
                         """
                         insert into signal_scout_signals (
-                          signal_id, target_id, scan_id, signal_type, title, summary, status, evidence
+                          signal_id, target_id, scan_id, signal_type, title, summary,
+                          status, evidence
                         ) values (
-                          :sid, :tid, :scan, :stype, :title, :summary, 'validated', cast(:evidence as jsonb)
+                          :sid, :tid, :scan, :stype, :title, :summary,
+                          'validated', cast(:evidence as jsonb)
                         )
                         """
                     ),
@@ -239,18 +254,39 @@ async def _run_scan(scan_id: str, target: dict[str, Any]) -> None:
                 )
                 stored.append(row)
 
+            await _set_scan(
+                session,
+                scan_id,
+                status="running",
+                progress=85,
+                stage="correlate",
+                pages=page_outcomes,
+                signal_count=len(stored),
+            )
+
             opportunities = opp.correlate_opportunities(target, stored)
+            await _set_scan(
+                session,
+                scan_id,
+                status="running",
+                progress=95,
+                stage="correlate",
+                pages=page_outcomes,
+                signal_count=len(stored),
+                opportunity_count=len(opportunities),
+            )
             for o in opportunities:
                 oid = f"opp_{uuid.uuid4().hex[:10]}"
                 await session.execute(
                     text(
                         """
                         insert into signal_scout_opportunities (
-                          opportunity_id, target_id, scan_id, title, summary, score, factors,
-                          signal_ids, signal_types, status
+                          opportunity_id, target_id, scan_id, title, summary, score,
+                          factors, signal_ids, signal_types, status
                         ) values (
-                          :oid, :tid, :scan, :title, :summary, :score, cast(:factors as jsonb),
-                          cast(:signal_ids as jsonb), cast(:signal_types as jsonb), 'potential'
+                          :oid, :tid, :scan, :title, :summary, :score,
+                          cast(:factors as jsonb), cast(:signal_ids as jsonb),
+                          cast(:signal_types as jsonb), 'potential'
                         )
                         """
                     ),
@@ -286,7 +322,7 @@ async def _run_scan(scan_id: str, target: dict[str, Any]) -> None:
                 stage="completed",
                 mode=mode,
                 label=label,
-                pages=pages,
+                pages=page_outcomes,
                 signal_count=len(stored),
                 opportunity_count=len(opportunities),
                 finished=now,
@@ -355,185 +391,20 @@ async def _set_scan(
     await session.commit()
 
 
-def _load_fixture(account_id: str | None) -> dict[str, Any] | None:
-    if not account_id:
-        return None
-    path = FIXTURE_DIR / f"{account_id}.json"
-    if not path.exists():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-async def _crm_on_file_signal(
-    session: AsyncSession, target: dict[str, Any]
-) -> dict[str, Any] | None:
-    aid = target.get("account_id")
-    if not aid:
-        return None
-    row = (
-        await session.execute(
-            text(
-                """
-                select signal_detected, signal_title, signal_description, signal_source_url,
-                       signal_published_date::text as signal_published_date,
-                       signal_classification, signal_type
-                from crm_master where account_id = :aid
-                """
-            ),
-            {"aid": aid},
-        )
-    ).mappings().first()
-    if not row or not row.get("signal_detected") or not row.get("signal_source_url"):
-        return None
-    if (row.get("signal_classification") or "") != "PUBLIC_VERIFIED":
-        return None
-    snippet = (row.get("signal_description") or row.get("signal_title") or "")[:220]
-    if not snippet:
-        return None
-    stype = "technology_initiative"
-    raw = (row.get("signal_type") or "").lower()
-    if "budget" in raw or "fund" in raw:
-        stype = "funding_budget"
-    elif "partner" in raw or "strategic" in raw:
-        stype = "strategic_announcement"
-    elif "leader" in raw:
-        stype = "leadership_change"
-    return {
-        "signal_type": stype,
-        "title": row.get("signal_title") or "CRM public signal",
-        "summary": snippet,
-        "evidence": [
-            {
-                "url": row["signal_source_url"],
-                "published_date": row.get("signal_published_date") or "unavailable",
-                "snippet": snippet,
-            }
-        ],
+def _legacy_page_type(page_type: str) -> str:
+    mapping = {
+        "newsroom": "news",
+        "announcements": "news",
+        "leadership": "leadership",
+        "budget": "funding",
+        "board_minutes": "funding",
     }
-
-
-async def _try_live_fetch(target: dict[str, Any]) -> dict[str, Any]:
-    url = target.get("website_url") or ""
-    on_file = (target.get("signal_on_file") or {}).get("source_url")
-    fetch_url = on_file or url
-    if not fetch_url:
-        return {"ok": False, "status": "failed", "page": None}
-    try:
-        async with httpx.AsyncClient(
-            timeout=8.0,
-            follow_redirects=True,
-            headers={"User-Agent": "LumoraSignalScoutDemo/0.1"},
-        ) as client:
-            # robots.txt soft check
-            parsed = httpx.URL(fetch_url)
-            robots_url = f"{parsed.scheme}://{parsed.host}/robots.txt"
-            try:
-                robots = await client.get(robots_url)
-                if robots.status_code == 200 and "Disallow: /" in robots.text and "User-agent: *" in robots.text:
-                    # Very coarse — only block if site disallows all
-                    if "Disallow: /\n" in robots.text or robots.text.strip().endswith("Disallow: /"):
-                        return {
-                            "ok": False,
-                            "status": "skipped_robots",
-                            "page": {
-                                "url": fetch_url,
-                                "page_type": "newsroom",
-                                "status": "skipped_robots",
-                                "title": "robots.txt disallow",
-                            },
-                        }
-            except Exception:
-                pass
-
-            resp = await client.get(fetch_url)
-            if resp.status_code >= 400:
-                return {
-                    "ok": False,
-                    "status": "failed",
-                    "page": {
-                        "url": fetch_url,
-                        "page_type": "newsroom",
-                        "status": "failed",
-                        "title": f"HTTP {resp.status_code}",
-                    },
-                }
-            text_body = resp.text
-            # Prefer CRM snippet validation if present
-            snippet = None
-            title = target.get("name")
-            on = target.get("signal_on_file") or {}
-            if on.get("title") and on["title"][:40].lower() in text_body.lower():
-                snippet = on["title"][:180]
-                title = on["title"]
-            if not snippet:
-                # take a short plain extract
-                cleaned = " ".join(text_body.split())
-                snippet = cleaned[200:380] if len(cleaned) > 400 else cleaned[:180]
-            if not snippet or len(snippet) < 20:
-                return {
-                    "ok": False,
-                    "status": "failed",
-                    "page": {
-                        "url": fetch_url,
-                        "page_type": "newsroom",
-                        "status": "failed",
-                        "title": "No usable snippet",
-                    },
-                }
-            if snippet not in text_body and snippet.lower() not in text_body.lower():
-                # title-case mismatch — still require presence
-                if snippet[:40].lower() not in text_body.lower():
-                    return {
-                        "ok": False,
-                        "status": "failed",
-                        "page": {
-                            "url": fetch_url,
-                            "page_type": "newsroom",
-                            "status": "failed",
-                            "title": "Snippet not found on page",
-                        },
-                    }
-            return {
-                "ok": True,
-                "page": {
-                    "url": fetch_url,
-                    "page_type": "newsroom",
-                    "status": "ok",
-                    "title": title,
-                },
-                "signals": [
-                    {
-                        "signal_type": "strategic_announcement",
-                        "title": title or "Live page signal",
-                        "summary": "Snippet validated against fetched page text.",
-                        "evidence": [
-                            {
-                                "url": fetch_url,
-                                "published_date": "unavailable",
-                                "snippet": snippet[:220],
-                            }
-                        ],
-                    }
-                ],
-            }
-    except Exception as exc:
-        logger.info("Live fetch skipped: %s", exc)
-        return {
-            "ok": False,
-            "status": "failed",
-            "page": {
-                "url": fetch_url,
-                "page_type": "newsroom",
-                "status": "failed",
-                "title": str(exc)[:120],
-            },
-        }
+    return mapping.get(page_type, page_type if page_type in pages.PAGE_HUB_CATEGORIES else "news")
 
 
 async def explain_opportunity(session: AsyncSession, opportunity_id: str) -> dict[str, Any]:
     detail = await scout.get_opportunity(session, opportunity_id)
     base = opp.rules_explanation(detail)
-    # Optional short LLM polish — never changes score
     try:
         from app.ai.azure_openai import AzureChatClient
 

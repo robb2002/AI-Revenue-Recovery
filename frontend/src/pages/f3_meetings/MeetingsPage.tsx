@@ -3,6 +3,7 @@ import { Mic, Sparkles, Trash2, UserRoundX } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiRequest } from '../../api/client'
+import { AccountSwitcher } from '../../components/AccountSwitcher'
 import { FictionalBadge } from '../../components/FictionalBadge'
 import {
   anonymizeSpeakersInTranscript,
@@ -11,6 +12,7 @@ import {
   loadKnownSpeakers,
   saveKnownSpeakers,
 } from '../../features/f3_meetings/speakerMemory'
+import { getWorkspaceAccountId } from '../../lib/workspaceAccount'
 
 type ExtractionItem = { value: string; status: string; quote?: string }
 type Extraction = Record<string, ExtractionItem | ExtractionItem[] | undefined>
@@ -103,7 +105,7 @@ type FormatSpeakersResult = {
 
 export function MeetingsPage() {
   const { accountId: routeAccountId } = useParams()
-  const accountId = routeAccountId || 'ACC-0181'
+  const accountId = routeAccountId || getWorkspaceAccountId() || ''
   const qc = useQueryClient()
   const audioInputRef = useRef<HTMLInputElement>(null)
 
@@ -125,7 +127,7 @@ export function MeetingsPage() {
 
   const resolvedAccount = uploadMeta?.selected_match?.account_id || accountId
   const opportunityId =
-    uploadMeta?.selected_match?.opportunity_id || data?.opportunity_id || 'OPP-0181'
+    uploadMeta?.selected_match?.opportunity_id || data?.opportunity_id || null
 
   const clearAll = () => {
     setTranscript('')
@@ -391,11 +393,18 @@ export function MeetingsPage() {
           </Link>
           <h2 className="mt-2 text-2xl font-semibold text-neutral-900">Meeting intelligence</h2>
           <p className="mt-1 text-sm text-neutral-500">
-            {data?.account_name || accountId} · upload audio or paste, then save only after you confirm
+            {data?.account_name || accountId || 'Select an account'} · upload audio or paste, then save
+            only after you confirm
           </p>
         </div>
         <FictionalBadge />
       </div>
+
+      <AccountSwitcher accountId={routeAccountId} feature="meetings" />
+
+      {!accountId && (
+        <p className="text-sm text-neutral-500">Select a working account to load meetings.</p>
+      )}
 
       {toast && (
         <div className="rounded-md border border-green-600/30 bg-green-50 px-4 py-2 text-sm text-green-700">
@@ -499,8 +508,8 @@ export function MeetingsPage() {
           </button>
         </div>
         <p className="text-xs text-neutral-500">
-          Audio is transcribed with Groq Whisper and is not stored. Demo path: Georgia Tech
-          follow-up call sample.
+          Audio is transcribed with Groq Whisper and is not stored. Sample TXT is ACC-0181 —
+          switch account above for other CRM rows.
           {knownSpeakers.length > 0 ? ` · Remembered names: ${knownSpeakers.join(', ')}` : ''}
         </p>
         {machineTranscribed && (

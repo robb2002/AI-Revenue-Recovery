@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = "http://localhost:5173"
     demo_as_of_date: str = "2026-11-04"
 
+    # Gmail (briefing inbox — browser GIS token; backend is read-only)
+    google_client_id: str = ""
+    gmail_login_hint: str = ""
+
     # Azure OpenAI (same keys as Sales Intelligence)
     llm_provider: str = "azure_openai"
     llm_api_key: str = ""

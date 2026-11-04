@@ -3,7 +3,9 @@ import { FilePen, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiRequest } from '../../api/client'
+import { AccountSwitcher } from '../../components/AccountSwitcher'
 import { FictionalBadge } from '../../components/FictionalBadge'
+import { getWorkspaceAccountId } from '../../lib/workspaceAccount'
 
 type Completeness = { complete: boolean; missing: string[] }
 
@@ -65,7 +67,7 @@ function StatusPill({ status }: { status: string }) {
 
 export function DraftsPage() {
   const { accountId: routeId } = useParams()
-  const accountId = routeId || 'ACC-0181'
+  const accountId = routeId || getWorkspaceAccountId() || ''
   const qc = useQueryClient()
   const [tab, setTab] = useState<Tab>('followup')
   const [subject, setSubject] = useState('')
@@ -77,6 +79,7 @@ export function DraftsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['drafts', accountId],
     queryFn: () => apiRequest<DraftsPayload>(`/api/v1/accounts/${accountId}/drafts`),
+    enabled: !!accountId,
   })
 
   useEffect(() => {
@@ -199,11 +202,13 @@ export function DraftsPage() {
             Follow-up & proposal drafts
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            {data?.account_name || accountId} · first drafts you still own
+            Pick a CRM account · drafts you still own (nothing sent)
           </p>
         </div>
         <FictionalBadge />
       </div>
+
+      <AccountSwitcher accountId={routeId} feature="drafts" />
 
       {toast && (
         <div className="rounded-md border border-green-600/30 bg-green-50 px-4 py-2 text-sm text-green-700">

@@ -1,6 +1,8 @@
-"""F1 §14 sample re-engagement drafts + §15 Gmail fixtures."""
+"""F1 §14 sample re-engagement drafts + §15 Gmail fixtures (demo mailbox)."""
 
 from __future__ import annotations
+
+from datetime import datetime, timezone
 
 SAMPLES: dict[str, dict[str, str]] = {
     "ACC-0178": {
@@ -43,8 +45,12 @@ SAMPLES: dict[str, dict[str, str]] = {
     },
 }
 
+DEMO_MAILBOX = "rep@lumora-demo.example"
 
-def render_sample(account_id: str, contact_name: str, account_owner: str, lost_reason: str) -> dict[str, str] | None:
+
+def render_sample(
+    account_id: str, contact_name: str, account_owner: str, lost_reason: str
+) -> dict[str, str] | None:
     raw = SAMPLES.get(account_id)
     if not raw:
         return None
@@ -59,63 +65,229 @@ def render_sample(account_id: str, contact_name: str, account_owner: str, lost_r
     }
 
 
-def gmail_fixture(account_id: str, contact_email: str) -> dict:
-    email = contact_email or "contact@example.edu"
-    rep = "rep@lumora-demo.example"
-    templates = {
-        "ACC-0178": ("asu", "Re: Timing for MyLab evaluation", "MyLab evaluation next steps"),
-        "ACC-0180": ("csu", "Re: Assessment timing", "Assessment evaluation next steps"),
-        "ACC-0189": ("osu", "Re: AI Fluency check-in", "AI Fluency follow-up"),
+def _msg(
+    *,
+    mid: str,
+    thread_id: str,
+    date: str,
+    frm: str,
+    to: str,
+    subject: str,
+    snippet: str,
+    classification: str,
+    direction: str,
+) -> dict:
+    return {
+        "gmail_message_id": mid,
+        "thread_id": thread_id,
+        "date": date,
+        "from": frm,
+        "to": to,
+        "subject": subject,
+        "snippet": snippet,
+        "classification": classification,
+        "direction": direction,
     }
-    key, new_subj, prev_subj = templates.get(account_id, ("gen", "Re: Follow-up", "Earlier outreach"))
+
+
+def gmail_fixture(account_id: str, contact_email: str) -> dict:
+    """University-specific demo thread: same contact_email + shared thread_id."""
+    email = (contact_email or "").strip() or "contact@example.edu"
+    rep = DEMO_MAILBOX
+    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    threads: dict[str, dict] = {
+        "ACC-0178": {
+            "key": "asu",
+            "institution": "Arizona State University",
+            "thread_id": "fixture_asu_thread_1",
+            "new": _msg(
+                mid="fixture_asu_new_001",
+                thread_id="fixture_asu_thread_1",
+                date="2026-10-28T15:12:00Z",
+                frm=email,
+                to=rep,
+                subject="Re: Timing for MyLab evaluation",
+                snippet=(
+                    "Thanks for holding — can we revisit after our November planning meeting "
+                    "at ASU? Same thread as our March exchange."
+                ),
+                classification="new",
+                direction="inbound",
+            ),
+            "previous": [
+                _msg(
+                    mid="fixture_asu_prev_001",
+                    thread_id="fixture_asu_thread_1",
+                    date="2026-03-04T18:00:00Z",
+                    frm=rep,
+                    to=email,
+                    subject="MyLab evaluation next steps",
+                    snippet="Sharing the outline we discussed and proposed pilot scope for ASU.",
+                    classification="previous",
+                    direction="outbound",
+                ),
+                _msg(
+                    mid="fixture_asu_prev_002",
+                    thread_id="fixture_asu_thread_1",
+                    date="2026-03-10T14:22:00Z",
+                    frm=email,
+                    to=rep,
+                    subject="Re: MyLab evaluation next steps",
+                    snippet="We need to pause — budget timing is the blocker for this quarter.",
+                    classification="previous",
+                    direction="inbound",
+                ),
+            ],
+        },
+        "ACC-0180": {
+            "key": "csu",
+            "institution": "California State University",
+            "thread_id": "fixture_csu_thread_1",
+            "new": _msg(
+                mid="fixture_csu_new_001",
+                thread_id="fixture_csu_thread_1",
+                date="2026-10-22T16:40:00Z",
+                frm=email,
+                to=rep,
+                subject="Re: Assessment timing",
+                snippet=(
+                    "Our AI learning workgroup reconvenes next month — happy to reopen the "
+                    "assessment conversation then."
+                ),
+                classification="new",
+                direction="inbound",
+            ),
+            "previous": [
+                _msg(
+                    mid="fixture_csu_prev_001",
+                    thread_id="fixture_csu_thread_1",
+                    date="2026-02-18T17:05:00Z",
+                    frm=rep,
+                    to=email,
+                    subject="Assessment evaluation next steps",
+                    snippet="Recap of discovery and suggested next evaluation workshop.",
+                    classification="previous",
+                    direction="outbound",
+                ),
+                _msg(
+                    mid="fixture_csu_prev_002",
+                    thread_id="fixture_csu_thread_1",
+                    date="2026-02-25T13:11:00Z",
+                    frm=email,
+                    to=rep,
+                    subject="Re: Assessment evaluation next steps",
+                    snippet="Priorities shifted — please hold outreach until spring planning.",
+                    classification="previous",
+                    direction="inbound",
+                ),
+            ],
+        },
+        "ACC-0189": {
+            "key": "osu",
+            "institution": "The Ohio State University",
+            "thread_id": "fixture_osu_thread_1",
+            "new": _msg(
+                mid="fixture_osu_new_001",
+                thread_id="fixture_osu_thread_1",
+                date="2026-10-30T19:05:00Z",
+                frm=email,
+                to=rep,
+                subject="Re: AI Fluency check-in",
+                snippet=(
+                    "AI Fluency planning is moving again — can you send a short one-pager "
+                    "aligned to our last requirements?"
+                ),
+                classification="new",
+                direction="inbound",
+            ),
+            "previous": [
+                _msg(
+                    mid="fixture_osu_prev_001",
+                    thread_id="fixture_osu_thread_1",
+                    date="2026-04-02T15:30:00Z",
+                    frm=rep,
+                    to=email,
+                    subject="AI Fluency follow-up",
+                    snippet="Following up on the fluency pilot outline we walked through.",
+                    classification="previous",
+                    direction="outbound",
+                ),
+                _msg(
+                    mid="fixture_osu_prev_002",
+                    thread_id="fixture_osu_thread_1",
+                    date="2026-04-09T12:48:00Z",
+                    frm=email,
+                    to=rep,
+                    subject="Re: AI Fluency follow-up",
+                    snippet="Please hold — internal priorities need to settle before we continue.",
+                    classification="previous",
+                    direction="inbound",
+                ),
+            ],
+        },
+    }
+
+    spec = threads.get(account_id)
+    if not spec:
+        tid = f"fixture_gen_{account_id}_thread_1"
+        new = _msg(
+            mid=f"fixture_gen_{account_id}_new_001",
+            thread_id=tid,
+            date="2026-10-20T12:00:00Z",
+            frm=email,
+            to=rep,
+            subject="Re: Follow-up",
+            snippet="Can we revisit when priorities clear?",
+            classification="new",
+            direction="inbound",
+        )
+        previous = [
+            _msg(
+                mid=f"fixture_gen_{account_id}_prev_001",
+                thread_id=tid,
+                date="2026-03-01T12:00:00Z",
+                frm=rep,
+                to=email,
+                subject="Earlier outreach",
+                snippet="Checking in on the last evaluation conversation.",
+                classification="previous",
+                direction="outbound",
+            ),
+            _msg(
+                mid=f"fixture_gen_{account_id}_prev_002",
+                thread_id=tid,
+                date="2026-03-08T12:00:00Z",
+                frm=email,
+                to=rep,
+                subject="Re: Earlier outreach",
+                snippet="Timing is difficult this quarter — please pause.",
+                classification="previous",
+                direction="inbound",
+            ),
+        ]
+        institution = account_id
+        thread_id = tid
+    else:
+        new = spec["new"]
+        previous = list(spec["previous"])
+        institution = str(spec["institution"])
+        thread_id = str(spec["thread_id"])
+
     return {
         "account_id": account_id,
         "match_email": email,
-        "source": "fixture",
-        "new_messages": [
-            {
-                "gmail_message_id": f"fixture_{key}_new_001",
-                "thread_id": f"fixture_{key}_thread_1",
-                "date": "2026-10-28T15:12:00Z",
-                "from": email,
-                "to": rep,
-                "subject": new_subj,
-                "snippet": "Thanks for holding — can we revisit after our November planning meeting?",
-                "body": (
-                    "Thanks for holding — can we revisit after our November planning meeting?\n\n"
-                    "Happy to pick up the evaluation once timing is clearer."
-                ),
-                "classification": "new",
-            }
-        ],
-        "previous_messages": [
-            {
-                "gmail_message_id": f"fixture_{key}_prev_001",
-                "thread_id": f"fixture_{key}_thread_1",
-                "date": "2026-03-04T18:00:00Z",
-                "from": rep,
-                "to": email,
-                "subject": prev_subj,
-                "snippet": "Sharing the outline we discussed and proposed pilot scope.",
-                "body": (
-                    "Sharing the outline we discussed and proposed pilot scope.\n\n"
-                    "Let me know if you want a follow-up call next week."
-                ),
-                "classification": "previous",
-            },
-            {
-                "gmail_message_id": f"fixture_{key}_prev_002",
-                "thread_id": f"fixture_{key}_thread_1",
-                "date": "2026-03-10T14:22:00Z",
-                "from": email,
-                "to": rep,
-                "subject": f"Re: {prev_subj}",
-                "snippet": "We need to pause — budget timing is the blocker for this quarter.",
-                "body": (
-                    "We need to pause — budget timing is the blocker for this quarter.\n\n"
-                    "Please keep the materials handy for when we reopen."
-                ),
-                "classification": "previous",
-            },
-        ],
+        "mailbox_email": DEMO_MAILBOX,
+        "mode": "demo_mailbox",
+        "source": "demo_mailbox",
+        "institution": institution,
+        "thread_id": thread_id,
+        "synced_at": now,
+        "new_messages": [new],
+        "previous_messages": previous,
+        "message_count": 1 + len(previous),
+        "notice": (
+            "Read-only demo mailbox matched to this account's contact_email. "
+            "Nothing was sent. Live Gmail OAuth uses the same DTO shape."
+        ),
     }

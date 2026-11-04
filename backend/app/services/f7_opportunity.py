@@ -1,4 +1,4 @@
-"""F7 — correlate validated signals into potential opportunities + rules score."""
+"""F7 — correlate validated signals → potential opportunity + rules score (SIS-shaped factors)."""
 
 from __future__ import annotations
 
@@ -15,101 +15,167 @@ SIGNAL_TYPES = {
     "contract_renewal",
 }
 
-# Rules own the integer — AI never sets this
-WEIGHTS = {
-    "base_pair": 35,
-    "per_extra_signal": 10,
-    "type_diversity": 12,
-    "procurement_or_funding": 18,
-    "fresh_signal": 10,
-    "dated_evidence": 8,
-    "max": 100,
-}
+EDTECH_TERMS = (
+    "assessment",
+    "testing",
+    "lms",
+    "learning",
+    "online learning",
+    "student information",
+    "digital transformation",
+    "modernization",
+    "ai fluency",
+    "edtech",
+)
+
+
+def _band(score: int) -> str:
+    if score >= 75:
+        return "high"
+    if score >= 50:
+        return "medium"
+    if score >= 25:
+        return "low"
+    return "monitor"
 
 
 def score_opportunity(
     signals: list[dict[str, Any]], *, as_of: date | None = None
 ) -> tuple[int, list[dict[str, Any]]]:
+    """Deterministic 0–100 with SIS-aligned factor keys (AI never sets the integer)."""
     as_of = as_of or date(2026, 11, 4)
     factors: list[dict[str, Any]] = []
-    score = 0
-
-    n = len(signals)
-    if n >= 2:
-        score += WEIGHTS["base_pair"]
-        factors.append(
-            {
-                "key": "correlated_signals",
-                "label": f"{n} correlated validated signals",
-                "points": WEIGHTS["base_pair"],
-            }
-        )
-        extra = min(3, n - 2) * WEIGHTS["per_extra_signal"]
-        if extra:
-            score += extra
-            factors.append(
-                {
-                    "key": "extra_signals",
-                    "label": "Additional validated signals",
-                    "points": extra,
-                }
-            )
-
     types = {s.get("signal_type") for s in signals if s.get("signal_type") in SIGNAL_TYPES}
-    if len(types) >= 2:
-        score += WEIGHTS["type_diversity"]
+
+    procurement = _procurement_relevance(types)
+    related = _related_signal_strength(types)
+    snippets = " ".join(
+        (e.get("snippet") or "")
+        for s in signals
+        for e in (s.get("evidence") or [])
+    )
+    edtech = _edtech_relevance(snippets)
+    recency = _recency(signals, today=as_of)
+    reliability = _source_reliability(signals)
+
+    def add(key: str, label: str, points: int, max_points: int, detail: str) -> None:
         factors.append(
             {
-                "key": "type_diversity",
-                "label": f"Signal type diversity ({len(types)} types)",
-                "points": WEIGHTS["type_diversity"],
+                "key": key,
+                "label": label,
+                "points": points,
+                "max_points": max_points,
+                "detail": detail,
             }
         )
 
-    if types & {"procurement", "funding_budget"}:
-        score += WEIGHTS["procurement_or_funding"]
-        factors.append(
-            {
-                "key": "procurement_funding",
-                "label": "Procurement or funding/budget signal present",
-                "points": WEIGHTS["procurement_or_funding"],
-            }
-        )
+    add(
+        "procurement_relevance",
+        "Procurement relevance",
+        procurement,
+        30,
+        "Procurement / contract / funding types raise attention (not an RFP prediction).",
+    )
+    add(
+        "related_signal_strength",
+        "Related signal strength",
+        related,
+        25,
+        f"{len(types)} distinct validated signal type(s) correlated.",
+    )
+    add(
+        "assessment_edtech_relevance",
+        "Assessment / EdTech relevance",
+        edtech,
+        20,
+        "Learning, LMS, assessment, or digital terms in evidence snippets.",
+    )
+    add(
+        "recency",
+        "Recency",
+        recency,
+        15,
+        "Newer published evidence scores higher vs demo as-of date.",
+    )
+    add(
+        "source_reliability",
+        "Source reliability",
+        reliability,
+        10,
+        "Official website evidence URLs preferred.",
+    )
 
-    fresh = 0
-    dated = 0
+    score = max(0, min(100, procurement + related + edtech + recency + reliability))
+    return score, factors
+
+
+def _procurement_relevance(types: set[str]) -> int:
+    if "procurement" in types or "contract_renewal" in types:
+        return 30
+    if "funding_budget" in types:
+        return 18
+    soft = {
+        "technology_initiative",
+        "leadership_change",
+        "strategic_announcement",
+        "competitor_vendor",
+    }
+    if types and types <= soft:
+        return 8
+    return 0
+
+
+def _related_signal_strength(types: set[str]) -> int:
+    n = len(types)
+    if n < 2:
+        return 0
+    points = 8 + 6 * (n - 2)
+    return min(25, points)
+
+
+def _edtech_relevance(text: str) -> int:
+    lower = text.lower()
+    hits = sum(1 for term in EDTECH_TERMS if term in lower)
+    if hits <= 0:
+        return 0
+    if hits <= 2:
+        return 10
+    return 20
+
+
+def _recency(signals: list[dict[str, Any]], *, today: date) -> int:
+    dates: list[date] = []
     for s in signals:
         for ev in s.get("evidence") or []:
             pub = ev.get("published_date")
-            if pub and pub != "unavailable":
-                dated += 1
-                try:
-                    d = date.fromisoformat(str(pub)[:10])
-                    if (as_of - d).days <= 400:
-                        fresh += 1
-                except ValueError:
-                    pass
-    if fresh:
-        score += WEIGHTS["fresh_signal"]
-        factors.append(
-            {
-                "key": "freshness",
-                "label": "At least one recent dated public snippet",
-                "points": WEIGHTS["fresh_signal"],
-            }
-        )
-    if dated:
-        score += WEIGHTS["dated_evidence"]
-        factors.append(
-            {
-                "key": "dated_evidence",
-                "label": "Evidence includes a published date",
-                "points": WEIGHTS["dated_evidence"],
-            }
-        )
+            if not pub or pub == "unavailable":
+                continue
+            try:
+                dates.append(date.fromisoformat(str(pub)[:10]))
+            except ValueError:
+                continue
+    if not dates:
+        return 0
+    age = (today - max(dates)).days
+    if age <= 30:
+        return 15
+    if age <= 90:
+        return 10
+    if age <= 180:
+        return 5
+    return 0
 
-    score = max(0, min(WEIGHTS["max"], score))
-    return score, factors
+
+def _source_reliability(signals: list[dict[str, Any]]) -> int:
+    best = 0
+    for s in signals:
+        for ev in s.get("evidence") or []:
+            url = ev.get("url") or ""
+            if url.startswith("https://"):
+                best = max(best, 6)  # official_website-equivalent
+            elif url.startswith("http"):
+                best = max(best, 3)
+    return best
 
 
 def correlate_opportunities(
@@ -135,6 +201,7 @@ def correlate_opportunities(
                 "This is not a prediction that an RFP will happen or that a deal will close."
             ),
             "score": score,
+            "score_band": _band(score),
             "factors": factors,
             "signal_ids": [s["signal_id"] for s in validated if s.get("signal_id")],
             "signal_types": types,
@@ -155,7 +222,7 @@ def rules_explanation(opportunity: dict[str, Any]) -> dict[str, Any]:
         facts.append(
             {
                 "layer": "fact",
-                "text": f"{f.get('label')}: {f.get('points')} points.",
+                "text": f"{f.get('label')}: {f.get('points')}/{f.get('max_points')} points.",
             }
         )
     return {

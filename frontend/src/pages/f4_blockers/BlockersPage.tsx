@@ -3,7 +3,9 @@ import { HelpCircle, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { apiRequest } from '../../api/client'
+import { AccountSwitcher } from '../../components/AccountSwitcher'
 import { FictionalBadge } from '../../components/FictionalBadge'
+import { getWorkspaceAccountId } from '../../lib/workspaceAccount'
 
 type BlockerPayload = {
   account_id: string
@@ -101,7 +103,7 @@ function StatusPill({ status }: { status: Answer['answer_status'] }) {
 
 export function BlockersPage() {
   const { accountId: routeId } = useParams()
-  const accountId = routeId || 'ACC-0181'
+  const accountId = routeId || getWorkspaceAccountId() || ''
   const [searchParams, setSearchParams] = useSearchParams()
   const autoAsk = searchParams.get('ask') === '1'
   const categoryFromRisk = searchParams.get('category') || ''
@@ -114,6 +116,7 @@ export function BlockersPage() {
     queryKey: ['blocker', accountId],
     queryFn: () => apiRequest<BlockerPayload>(`/api/v1/accounts/${accountId}/blocker`),
     staleTime: 60_000,
+    enabled: !!accountId,
   })
 
   const starters = useMemo(() => {
@@ -217,11 +220,13 @@ export function BlockersPage() {
             Deal blocker resolution
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            {data?.account_name || accountId} · answers from approved docs only
+            Pick a CRM account · answers from approved docs only
           </p>
         </div>
         <FictionalBadge />
       </div>
+
+      <AccountSwitcher accountId={routeId} feature="blockers" />
 
       {toast && (
         <div className="rounded-md border border-green-600/30 bg-green-50 px-4 py-2 text-sm text-green-700">

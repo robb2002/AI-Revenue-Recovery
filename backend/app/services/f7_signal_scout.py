@@ -57,7 +57,7 @@ async def ensure_f7_tables(session: AsyncSession) -> None:
               scan_id text primary key,
               target_id text not null references signal_scout_targets(target_id),
               status text not null,
-              mode text not null default 'fixture',
+              mode text not null default 'live',
               progress_pct int default 0,
               stage text,
               page_outcomes jsonb default '[]'::jsonb,
@@ -108,8 +108,123 @@ async def ensure_f7_tables(session: AsyncSession) -> None:
             """
         )
     )
+    await session.execute(
+        text(
+            """
+            create table if not exists signal_scout_pages (
+              page_id text primary key,
+              target_id text not null references signal_scout_targets(target_id) on delete cascade,
+              account_id text,
+              url text not null,
+              page_category text not null,
+              title text,
+              status text not null,
+              scan_id text,
+              last_validated_at timestamptz,
+              created_at timestamptz default now(),
+              unique (target_id, url)
+            )
+            """
+        )
+    )
+    await session.execute(
+        text(
+            """
+            create index if not exists idx_signal_scout_pages_target
+            on signal_scout_pages (target_id)
+            """
+        )
+    )
+    await session.execute(
+        text(
+            """
+            create index if not exists idx_signal_scout_pages_account
+            on signal_scout_pages (account_id)
+            """
+        )
+    )
     await session.commit()
     _tables_ready = True
+
+
+async def upsert_target_pages(
+    session: AsyncSession,
+    *,
+    target_id: str,
+    account_id: str | None,
+    scan_id: str,
+    page_outcomes: list[dict[str, Any]],
+) -> int:
+    """Persist discovered/validated pages for this university target (no fixture JSON)."""
+    await ensure_f7_tables(session)
+    now = datetime.now(timezone.utc)
+    saved = 0
+    for p in page_outcomes:
+        url = (p.get("url") or "").strip()
+        if not url:
+            continue
+        category = (p.get("page_category") or p.get("page_type") or "news").strip()
+        status = (p.get("status") or "failed").strip()
+        title = (p.get("title") or "")[:300] or None
+        page_id = f"page_{uuid.uuid4().hex[:12]}"
+        await session.execute(
+            text(
+                """
+                insert into signal_scout_pages (
+                  page_id, target_id, account_id, url, page_category, title, status,
+                  scan_id, last_validated_at
+                ) values (
+                  :pid, :tid, :aid, :url, :cat, :title, :status, :scan, :ts
+                )
+                on conflict (target_id, url) do update set
+                  page_category = excluded.page_category,
+                  title = coalesce(excluded.title, signal_scout_pages.title),
+                  status = excluded.status,
+                  scan_id = excluded.scan_id,
+                  last_validated_at = excluded.last_validated_at,
+                  account_id = coalesce(excluded.account_id, signal_scout_pages.account_id)
+                """
+            ),
+            {
+                "pid": page_id,
+                "tid": target_id,
+                "aid": account_id,
+                "url": url,
+                "cat": category,
+                "title": title,
+                "status": status,
+                "scan": scan_id,
+                "ts": now,
+            },
+        )
+        saved += 1
+    await session.commit()
+    return saved
+
+
+async def list_target_pages(session: AsyncSession, target_id: str) -> list[dict[str, Any]]:
+    await ensure_f7_tables(session)
+    rows = (
+        await session.execute(
+            text(
+                """
+                select page_id, target_id, account_id, url, page_category, title, status,
+                       scan_id, last_validated_at
+                from signal_scout_pages
+                where target_id = :tid
+                order by last_validated_at desc nulls last, page_category, url
+                """
+            ),
+            {"tid": target_id},
+        )
+    ).mappings().all()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("last_validated_at"):
+            d["last_validated_at"] = d["last_validated_at"].isoformat()
+        out.append(d)
+    return out
 
 
 def _validate_website(url: str) -> str:
@@ -369,6 +484,8 @@ async def get_target(session: AsyncSession, target_id: str) -> dict[str, Any]:
         {"tid": target_id},
     )
 
+    stored_pages = await list_target_pages(session, target_id)
+
     return {
         "target_id": row["target_id"],
         "account_id": row.get("account_id"),
@@ -378,6 +495,7 @@ async def get_target(session: AsyncSession, target_id: str) -> dict[str, Any]:
         "last_scanned_at": row["last_scanned_at"].isoformat() if row.get("last_scanned_at") else None,
         "scan_in_progress": bool(running),
         "active_scan_id": running,
+        "pages": stored_pages,
         **crm_extra,
         "notice": (
             "Public sources only. Potential opportunities are not committed pipeline."
@@ -386,9 +504,18 @@ async def get_target(session: AsyncSession, target_id: str) -> dict[str, Any]:
     }
 
 
+async def _require_target_id(session: AsyncSession, target_id: str) -> None:
+    exists = await session.scalar(
+        text("select 1 from signal_scout_targets where target_id = :tid"),
+        {"tid": target_id},
+    )
+    if not exists:
+        raise NotFoundError("target")
+
+
 async def list_signals(session: AsyncSession, target_id: str) -> dict[str, Any]:
     await ensure_f7_tables(session)
-    await get_target(session, target_id)
+    await _require_target_id(session, target_id)
     rows = (
         await session.execute(
             text(
@@ -416,7 +543,7 @@ async def list_signals(session: AsyncSession, target_id: str) -> dict[str, Any]:
 
 async def list_opportunities(session: AsyncSession, target_id: str) -> dict[str, Any]:
     await ensure_f7_tables(session)
-    await get_target(session, target_id)
+    await _require_target_id(session, target_id)
     rows = (
         await session.execute(
             text(
@@ -438,6 +565,15 @@ async def list_opportunities(session: AsyncSession, target_id: str) -> dict[str,
             if isinstance(d.get(key), str):
                 d[key] = json.loads(d[key])
         d["created_at"] = r["created_at"].isoformat() if r.get("created_at") else None
+        score = int(d.get("score") or 0)
+        if score >= 75:
+            d["score_band"] = "high"
+        elif score >= 50:
+            d["score_band"] = "medium"
+        elif score >= 25:
+            d["score_band"] = "low"
+        else:
+            d["score_band"] = "monitor"
         items.append(d)
     return {
         "target_id": target_id,
@@ -468,6 +604,21 @@ async def get_opportunity(session: AsyncSession, opportunity_id: str) -> dict[st
         if isinstance(d.get(key), str):
             d[key] = json.loads(d[key])
     d["created_at"] = row["created_at"].isoformat() if row.get("created_at") else None
+    score = int(d.get("score") or 0)
+    if score >= 75:
+        d["score_band"] = "high"
+    elif score >= 50:
+        d["score_band"] = "medium"
+    elif score >= 25:
+        d["score_band"] = "low"
+    else:
+        d["score_band"] = "monitor"
+    # Ensure factor bars have max_points for older rows
+    factors = d.get("factors") or []
+    if isinstance(factors, list):
+        for f in factors:
+            if isinstance(f, dict) and "max_points" not in f:
+                f["max_points"] = f.get("points") or 1
 
     sig_ids = set(d.get("signal_ids") or [])
     signals = []

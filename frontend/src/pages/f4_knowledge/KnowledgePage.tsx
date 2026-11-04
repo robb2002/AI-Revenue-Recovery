@@ -130,7 +130,7 @@ export function KnowledgePage() {
           />
         </label>
         <Link
-          to="/accounts/ACC-0181/blockers"
+          to="/blockers"
           className="text-sm font-medium text-navy-600 hover:underline"
         >
           Open blockers workspace →

@@ -9,10 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, NotFoundError
 from app.services.f1_llm import llm_draft, llm_explanation
-from app.services.f1_samples import gmail_fixture, render_sample
+from app.services.f1_samples import render_sample
 
-# In-memory last fixture sync per account (hackathon; no Gmail OAuth yet)
-_THREAD_CACHE: dict[str, dict] = {}
+
+def _parse_history(raw: Any) -> list[dict[str, Any]]:
+    history = raw
+    if isinstance(history, str):
+        try:
+            history = json.loads(history)
+        except json.JSONDecodeError:
+            history = []
+    if history is None:
+        history = []
+    if not isinstance(history, list):
+        return []
+    return [h for h in history if isinstance(h, dict)]
 
 
 class ConfirmationRequiredError(AppError):
@@ -235,7 +246,6 @@ async def get_recovery_detail(session: AsyncSession, account_id: str) -> dict[st
             "body": row["followup_email_body"],
             "state": row["followup_message_status"] or "draft",
         },
-        "gmail_thread": _THREAD_CACHE.get(account_id),
         "as_of_date": row["as_of_date"],
         "data_label": "Fictional demo data",
     }
@@ -334,56 +344,31 @@ async def set_draft_state(session: AsyncSession, account_id: str, state: str) ->
     return {"state": state}
 
 
-def sync_gmail_fixtures(account_id: str, contact_email: str | None) -> dict:
-    thread = gmail_fixture(account_id, contact_email or "")
-    _THREAD_CACHE[account_id] = thread
-    return thread
-
-
-async def sync_gmail_live(
+async def preview_crm_log(
     session: AsyncSession,
-    *,
     account_id: str,
-    access_token: str | None,
-    allow_fixtures: bool = True,
-) -> dict:
-    from app.services.f1_gmail import (
-        GmailNotConnectedError,
-        NoContactEmailError,
-        fetch_contact_thread,
-    )
-
+    *,
+    source: str = "draft",
+    gmail_message_id: str | None = None,
+) -> dict[str, Any]:
+    del gmail_message_id  # inbox approve uses /gmail/inbox/* — recovery keeps draft-only CRM log
     row = await get_recovery_row(session, account_id)
-    contact_email = row.get("contact_email")
-    if not contact_email:
-        raise NoContactEmailError()
-
-    if access_token and access_token.strip():
-        thread = await fetch_contact_thread(
-            access_token=access_token.strip(),
-            account_id=account_id,
-            contact_email=str(contact_email),
-            last_activity_date=row.get("last_activity_date"),
+    as_of = row.get("as_of_date") or date.today().isoformat()
+    source_norm = (source or "draft").strip().lower()
+    if source_norm != "draft":
+        raise ValidationAppError(
+            "Use Briefing → Inbox leads to approve Gmail into CRM. Recovery CRM log is draft-only."
         )
-        _THREAD_CACHE[account_id] = thread
-        return thread
 
-    if allow_fixtures:
-        return sync_gmail_fixtures(account_id, str(contact_email))
-    raise GmailNotConnectedError()
-
-
-async def preview_crm_log(session: AsyncSession, account_id: str) -> dict[str, Any]:
-    row = await get_recovery_row(session, account_id)
     subject = row.get("followup_email_subject")
     body = row.get("followup_email_body")
     if not subject or not body:
         raise ValidationAppError("Generate or save a draft before logging to CRM.")
-    as_of = row.get("as_of_date") or date.today().isoformat()
     return {
         "account_id": account_id,
+        "source": "draft",
         "requires_confirmation": True,
-        "summary": "Log outbound re-engagement email and refresh last-contact fields.",
+        "summary": "Log outbound re-engagement draft and refresh last-contact fields.",
         "proposed_activity": {
             "date": as_of,
             "type": "Email",
@@ -404,27 +389,27 @@ async def preview_crm_log(session: AsyncSession, account_id: str) -> dict[str, A
             "deal_value",
             "signal_source_url",
             "recovery is not marked as revenue recovered",
+            "email is not sent",
         ],
         "data_label": "Fictional demo data",
     }
 
 
-async def confirm_crm_log(session: AsyncSession, account_id: str, confirm: bool) -> dict[str, Any]:
+async def confirm_crm_log(
+    session: AsyncSession,
+    account_id: str,
+    confirm: bool,
+    *,
+    source: str = "draft",
+    gmail_message_id: str | None = None,
+) -> dict[str, Any]:
     if not confirm:
         raise ConfirmationRequiredError()
-    preview = await preview_crm_log(session, account_id)
+    preview = await preview_crm_log(
+        session, account_id, source=source, gmail_message_id=gmail_message_id
+    )
     row = await get_recovery_row(session, account_id)
-    history = row.get("activity_history")
-    if isinstance(history, str):
-        try:
-            history = json.loads(history)
-        except json.JSONDecodeError:
-            history = []
-    if history is None:
-        history = []
-    if not isinstance(history, list):
-        history = []
-    history = list(history)
+    history = _parse_history(row.get("activity_history"))
     history.append(preview["proposed_activity"])
     as_of = preview["field_updates"]["last_contacted_date"]
     await session.execute(
@@ -446,8 +431,12 @@ async def confirm_crm_log(session: AsyncSession, account_id: str, confirm: bool)
         },
     )
     await session.commit()
-    return {"ok": True, "account_id": account_id, "followup_message_status": "approved"}
-
+    return {
+        "ok": True,
+        "account_id": account_id,
+        "source": "draft",
+        "followup_message_status": "approved",
+    }
 
 async def reopen(session: AsyncSession, account_id: str, confirm: bool) -> dict[str, Any]:
     if not confirm:
@@ -463,15 +452,7 @@ async def reopen(session: AsyncSession, account_id: str, confirm: bool) -> dict[
         "outcome": "Status set to open",
         "classification": "SYNTHETIC",
     }
-    history = row.get("activity_history")
-    if isinstance(history, str):
-        try:
-            history = json.loads(history)
-        except json.JSONDecodeError:
-            history = []
-    if not isinstance(history, list):
-        history = []
-    history = list(history)
+    history = _parse_history(row.get("activity_history"))
     history.append(note)
     await session.execute(
         text(

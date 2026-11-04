@@ -3,7 +3,9 @@ import { Handshake, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiRequest } from '../../api/client'
+import { AccountSwitcher } from '../../components/AccountSwitcher'
 import { FictionalBadge } from '../../components/FictionalBadge'
+import { getWorkspaceAccountId } from '../../lib/workspaceAccount'
 
 type HandoffPack = {
   stakeholders: Array<{ name: string; role: string; is_decision_maker?: boolean }>
@@ -57,7 +59,7 @@ function StatusPill({ status, dealStatus }: { status: string; dealStatus: string
 
 export function HandoffPage() {
   const { accountId: routeId } = useParams()
-  const accountId = routeId || 'ACC-0015'
+  const accountId = routeId || getWorkspaceAccountId() || ''
   const qc = useQueryClient()
   const [confirmWon, setConfirmWon] = useState(false)
   const [showMarkWon, setShowMarkWon] = useState(false)
@@ -66,6 +68,7 @@ export function HandoffPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['handoff', accountId],
     queryFn: () => apiRequest<HandoffPayload>(`/api/v1/accounts/${accountId}/handoff`),
+    enabled: !!accountId,
   })
 
   const markWon = useMutation({
@@ -129,11 +132,17 @@ export function HandoffPage() {
             Customer handoff
           </h2>
           <p className="mt-1 text-sm text-neutral-500">
-            {data?.account_name || accountId} · pack context for delivery — no tickets sent
+            Pick a CRM account · pack context for delivery — no tickets sent
           </p>
         </div>
         <FictionalBadge />
       </div>
+
+      <AccountSwitcher
+        accountId={routeId}
+        feature="handoff"
+        demoAccountIds={['ACC-0015', 'ACC-0181']}
+      />
 
       {toast && (
         <div className="rounded-md border border-green-600/30 bg-green-50 px-4 py-2 text-sm text-green-700">
