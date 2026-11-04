@@ -1,6 +1,6 @@
 # AI Revenue Recovery & Deal Intelligence Agent
 
-Lumora Learning (fictional EdTech seller). One AI sales agent that finds forgotten revenue, ranks at-risk deals, turns meetings into CRM facts, answers blockers with citations, drafts the next move, and hands won deals to delivery. Humans approve every external step. Demo CRM data is fictional.
+Lumora Learning (fictional EdTech seller). One AI sales agent that monitors buying signals, recovers forgotten leads, ranks at-risk deals, turns meetings into CRM facts, answers blockers with citations, drafts the next move, and hands won deals to delivery. Humans approve every external step. Demo CRM data is fictional.
 
 ---
 
@@ -8,32 +8,33 @@ Lumora Learning (fictional EdTech seller). One AI sales agent that finds forgott
 
 | Pain | What happens today |
 | --- | --- |
-| Forgotten leads | Lost / postponed deals sit idle while budgets and leadership change |
+| No signal monitoring | Public budget, leadership, and initiative news is not watched or linked to CRM |
+| Forgotten leads | Lost / postponed deals sit idle even when the market reason may have changed |
 | Silent pipeline risk | High-value open deals go quiet; reps notice too late |
 | Meeting leakage | Requirements, blockers, and next steps stay in notes or recordings |
 | Unanswered blockers | Security / LMS / pricing questions stall deals for days |
 | Slow follow-ups | Tailored proposals take hours to assemble from scattered context |
 | Broken handoff | Delivery inherits a thin CRM record; context dies at Closed Won |
 
-Point tools cover pieces of this. Rare is one evidence-backed workflow from recovery to handoff, with rule-based scores and human decisions.
+Sales tools score CRM activity. They rarely watch public buying signals and connect them to recovery and outreach in one place.
 
 ---
 
 ## Our solution
 
-Find (F1) → Assess (F2) → Understand (F3) → Resolve (F4) → Move forward (F5) → Preserve (F6) → Scout signals (F7)
+Scout (F7) → Find (F1) → Assess (F2) → Understand (F3) → Resolve (F4) → Move forward (F5) → Preserve (F6)
 
 | ID | Feature | What the rep gets |
 | --- | --- | --- |
-| F1 | Lost Lead Recovery | Ranked inactive / lost deals, why to review, re-engagement draft |
+| F7 | Signal Scout | Watch curated public pages → cite buying signals → suggest potential opportunities |
+| F1 | Lost Lead Recovery | Ranked inactive / lost deals, why to review (including signals), re-engagement draft |
 | F2 | Revenue Risk Prioritizer | Open deals by urgency; factors + recommended action |
 | F3 | Meeting Intelligence | Transcript / audio → requirements, blockers, next steps → confirmed CRM save |
 | F4 | Deal Blocker Resolution | Question → KB answer with citations, or insufficient_evidence |
 | F5 | Follow-up & Proposal Generator | Tailored draft for approve / reject |
 | F6 | Customer Handoff | After win, structured delivery handoff |
-| F7 | Signal Scout | Curated public pages → buying signals → potential opportunities |
 
-Product rules: separate fact / interpretation / recommended_action; scores are deterministic rules (LLM explains only); evidence required; drafts are never auto-sent; say "may be worth reviewing" and "at risk", never "will close" or "is recovered".
+Signals feed recovery: a verified public update can reopen the case for a forgotten lead. Scores stay rule-based; the LLM explains with evidence only. Drafts are never auto-sent.
 
 ---
 
@@ -41,7 +42,8 @@ Product rules: separate fact / interpretation / recommended_action; scores are d
 
 | Outcome | How this drives it |
 | --- | --- |
-| Recover ignored pipeline | High-value lost / quiet deals with reason + ready check-in |
+| Catch timing windows | Public signals watched and linked to accounts before competitors notice |
+| Recover ignored pipeline | Lost / quiet deals ranked with reason + ready check-in |
 | Protect forecast | Open risk ranked early with transparent factors |
 | Shorten cycle time | Meeting extract + blocker RAG + draft in one flow |
 | Raise trust | Citations + insufficient_evidence instead of hallucination |
