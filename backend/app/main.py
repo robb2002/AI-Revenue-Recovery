@@ -52,8 +52,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     engine = create_engine(settings.database_url)
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("API starting (env=%s)", settings.app_env)
+        # Warm Signal Scout tables so first search is not a long migration
+        try:
+            from app.services.f7_signal_scout import ensure_f7_tables
+
+            async with app.state.session_factory() as session:
+                await ensure_f7_tables(session)
+            logger.info("Signal Scout tables ready")
+        except Exception:
+            logger.exception("Signal Scout table warm-up skipped")
         yield
         await engine.dispose()
 

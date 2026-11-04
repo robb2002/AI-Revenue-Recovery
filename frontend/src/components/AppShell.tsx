@@ -1,5 +1,16 @@
 import { UserButton, useUser } from '@clerk/react'
-import { BookOpen, Database, FileText, LayoutDashboard, RotateCcw, ShieldAlert } from 'lucide-react'
+import {
+  BookOpen,
+  Database,
+  FilePen,
+  FileText,
+  Handshake,
+  HelpCircle,
+  LayoutDashboard,
+  Radar,
+  RotateCcw,
+  ShieldAlert,
+} from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
 import { FictionalBadge } from './FictionalBadge'
 
@@ -8,6 +19,10 @@ const NAV = [
   { to: '/recovery', label: 'Lead Recovery', icon: RotateCcw },
   { to: '/risk', label: 'Risk', icon: ShieldAlert },
   { to: '/accounts/ACC-0181/meetings', label: 'Meetings', icon: FileText },
+  { to: '/accounts/ACC-0181/blockers', label: 'Blockers', icon: HelpCircle },
+  { to: '/accounts/ACC-0181/drafts', label: 'Drafts', icon: FilePen },
+  { to: '/accounts/ACC-0181/handoff', label: 'Handoff', icon: Handshake },
+  { to: '/signal-scout', label: 'Signal Scout', icon: Radar },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
   { to: '/data', label: 'Data', icon: Database },
 ]

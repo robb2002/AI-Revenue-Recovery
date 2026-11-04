@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiRequest } from '../../api/client'
 import { FictionalBadge } from '../../components/FictionalBadge'
@@ -101,6 +101,16 @@ export function RiskDetailPage() {
     queryFn: () => apiRequest<RiskDetail>(`/api/v1/accounts/${accountId}/risk`),
     enabled: !!accountId,
   })
+
+  // Warm Blockers cache so Risk → Resolve feels instant
+  useEffect(() => {
+    if (!data?.blocker.detected || !accountId) return
+    void qc.prefetchQuery({
+      queryKey: ['blocker', accountId],
+      queryFn: () => apiRequest(`/api/v1/accounts/${accountId}/blocker`),
+      staleTime: 60_000,
+    })
+  }, [data?.blocker.detected, accountId, qc])
 
   const explain = useMutation({
     mutationFn: () =>
@@ -269,9 +279,16 @@ export function RiskDetailPage() {
           <p className="mt-1 text-sm text-amber-800">
             {data.blocker.category} · {data.blocker.severity} · {data.blocker.status}
           </p>
-          <p className="mt-1 text-xs text-amber-700">
-            Resolve with Blocker workspace (F4) when available — not embedded here.
+          <p className="mt-2 text-sm text-amber-900">
+            Risk shows that a blocker exists and how it affects the score. Answers with citations
+            live in the Blocker workspace — not inside Risk.
           </p>
+          <Link
+            to={`/accounts/${data.account_id}/blockers?ask=1&category=${encodeURIComponent(data.blocker.category || '')}`}
+            className="mt-2 inline-flex cursor-pointer text-sm font-medium text-navy-700 underline hover:text-navy-900"
+          >
+            Resolve this blocker →
+          </Link>
         </section>
       )}
 

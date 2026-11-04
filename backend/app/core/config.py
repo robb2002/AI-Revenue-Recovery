@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     azure_openai_endpoint: str = ""
     azure_openai_api_version: str = "2024-02-15-preview"
 
+    # Same Azure embedding deployment as Sales Intelligence parent project
+    embedding_model: str = "text-embedding-ada-002"
+    embedding_dimensions: int = 1536
+    embedding_similarity_gate: float = 0.72
+    retrieval_top_k: int = 5
+    embedding_timeout_seconds: int = 15
+
     @field_validator("database_url")
     @classmethod
     def use_asyncpg_driver(cls, value: str) -> str:
@@ -68,6 +75,15 @@ class Settings(BaseSettings):
             self.llm_api_key.strip()
             and self.azure_openai_endpoint.strip()
             and self.llm_model.strip()
+        )
+
+    @property
+    def embedding_configured(self) -> bool:
+        return bool(
+            self.llm_api_key.strip()
+            and self.azure_openai_endpoint.strip()
+            and self.embedding_model.strip()
+            and self.embedding_dimensions > 0
         )
 
 

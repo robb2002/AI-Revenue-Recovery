@@ -28,6 +28,7 @@ class AzureChatClient:
         system: str,
         user: str,
         temperature: float = 0.3,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any] | None:
         if not self.configured:
             return None
@@ -49,8 +50,9 @@ class AzureChatClient:
             "api-key": self.settings.llm_api_key,
             "Content-Type": "application/json",
         }
+        timeout = timeout_seconds if timeout_seconds is not None else self.settings.llm_timeout_seconds
         try:
-            async with httpx.AsyncClient(timeout=self.settings.llm_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()

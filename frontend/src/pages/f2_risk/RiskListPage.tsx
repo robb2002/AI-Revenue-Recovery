@@ -95,11 +95,16 @@ export function RiskListPage() {
         <button
           type="button"
           onClick={() => {
-            setPreset((p) => (p ? null : 'needs_attention_today'))
-            if (!preset) setBand('')
+            if (preset) {
+              setPreset(null)
+              setBand('high')
+            } else {
+              setPreset('needs_attention_today')
+              setBand('')
+            }
           }}
           className={[
-            'rounded-md border px-3 py-1.5 text-sm font-medium',
+            'cursor-pointer rounded-md border px-3 py-1.5 text-sm font-medium',
             preset
               ? 'border-navy-600 bg-navy-600 text-white'
               : 'border-neutral-300 bg-white text-neutral-700 hover:bg-navy-50',
@@ -111,17 +116,15 @@ export function RiskListPage() {
           <button
             key={b || 'all'}
             type="button"
-            disabled={!!preset}
             onClick={() => {
               setPreset(null)
               setBand(b)
             }}
             className={[
-              'rounded-md border px-3 py-1.5 text-sm capitalize',
+              'cursor-pointer rounded-md border px-3 py-1.5 text-sm capitalize',
               !preset && band === b
                 ? 'border-navy-600 bg-navy-50 text-navy-700'
-                : 'border-neutral-300 bg-white text-neutral-600',
-              preset ? 'opacity-40' : '',
+                : 'border-neutral-300 bg-white text-neutral-600 hover:bg-navy-50',
             ].join(' ')}
           >
             {b || 'All bands'}
@@ -134,10 +137,10 @@ export function RiskListPage() {
             type="button"
             onClick={() => setStatus(s)}
             className={[
-              'rounded-md border px-3 py-1.5 text-sm capitalize',
+              'cursor-pointer rounded-md border px-3 py-1.5 text-sm capitalize',
               status === s
                 ? 'border-navy-600 bg-navy-50 text-navy-700'
-                : 'border-neutral-300 bg-white text-neutral-600',
+                : 'border-neutral-300 bg-white text-neutral-600 hover:bg-navy-50',
             ].join(' ')}
           >
             {s || 'Open + stalled'}
