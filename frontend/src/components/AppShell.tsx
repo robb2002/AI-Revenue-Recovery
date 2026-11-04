@@ -1,14 +1,5 @@
 import { UserButton, useUser } from '@clerk/react'
-import {
-  BookOpen,
-  Handshake,
-  HelpCircle,
-  LayoutDashboard,
-  Radar,
-  RotateCcw,
-  ShieldAlert,
-  Database,
-} from 'lucide-react'
+import { BookOpen, Database, LayoutDashboard, RotateCcw, ShieldAlert } from 'lucide-react'
 import { NavLink, Outlet } from 'react-router'
 import { FictionalBadge } from './FictionalBadge'
 
@@ -17,7 +8,6 @@ const NAV = [
   { to: '/recovery', label: 'Lead Recovery', icon: RotateCcw },
   { to: '/risk', label: 'Risk', icon: ShieldAlert },
   { to: '/knowledge', label: 'Knowledge', icon: BookOpen },
-  { to: '/signal-scout', label: 'Signal Scout', icon: Radar },
   { to: '/data', label: 'Data', icon: Database },
 ]
 
@@ -50,26 +40,18 @@ export function AppShell() {
               {label}
             </NavLink>
           ))}
-          <p className="mt-4 px-3 text-[11px] text-navy-300">
-            Account tools (meetings, blockers, drafts, handoff) open from an account.
-          </p>
-          <div className="mt-2 flex items-center gap-2 px-3 text-navy-300">
-            <HelpCircle className="size-3.5" />
-            <Handshake className="size-3.5" />
-            <span className="text-[11px]">F3–F6 via account</span>
-          </div>
         </nav>
         <div className="border-t border-navy-700 p-4">
           <p className="truncate text-xs text-navy-300">{user?.primaryEmailAddress?.emailAddress}</p>
           <div className="mt-2">
-            <UserButton afterSignOutUrl="/login" />
+            <UserButton />
           </div>
         </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-16 items-center justify-between border-b border-neutral-200 bg-white px-6">
-          <p className="text-sm text-neutral-500">AI sales agent · human-approved actions</p>
+          <p className="text-sm text-neutral-500">Human-approved actions · nothing sent automatically</p>
           <FictionalBadge />
         </header>
         <main className="flex-1 overflow-auto p-6">
