@@ -340,6 +340,39 @@ def sync_gmail_fixtures(account_id: str, contact_email: str | None) -> dict:
     return thread
 
 
+async def sync_gmail_live(
+    session: AsyncSession,
+    *,
+    account_id: str,
+    access_token: str | None,
+    allow_fixtures: bool = True,
+) -> dict:
+    from app.services.f1_gmail import (
+        GmailNotConnectedError,
+        NoContactEmailError,
+        fetch_contact_thread,
+    )
+
+    row = await get_recovery_row(session, account_id)
+    contact_email = row.get("contact_email")
+    if not contact_email:
+        raise NoContactEmailError()
+
+    if access_token and access_token.strip():
+        thread = await fetch_contact_thread(
+            access_token=access_token.strip(),
+            account_id=account_id,
+            contact_email=str(contact_email),
+            last_activity_date=row.get("last_activity_date"),
+        )
+        _THREAD_CACHE[account_id] = thread
+        return thread
+
+    if allow_fixtures:
+        return sync_gmail_fixtures(account_id, str(contact_email))
+    raise GmailNotConnectedError()
+
+
 async def preview_crm_log(session: AsyncSession, account_id: str) -> dict[str, Any]:
     row = await get_recovery_row(session, account_id)
     subject = row.get("followup_email_subject")

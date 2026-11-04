@@ -15,6 +15,11 @@ class ExtractBody(BaseModel):
     opportunity_id: str | None = None
 
 
+class FormatSpeakersBody(BaseModel):
+    transcript: str
+    known_speakers: list[str] = Field(default_factory=list)
+
+
 class SaveBody(BaseModel):
     confirm: bool = False
     account_id: str
@@ -49,6 +54,31 @@ async def meetings_upload(
         data=data,
         account_id=account_id,
         opportunity_id=opportunity_id,
+    )
+
+
+@router.post("/meetings/transcribe")
+async def meetings_transcribe(
+    _user: CurrentUserDep,
+    file: UploadFile = File(...),
+) -> dict:
+    """Audio → text only. Does not store audio or write CRM."""
+    from app.services.f3_stt import transcribe_audio
+
+    data = await file.read()
+    filename = file.filename or "audio.wav"
+    return await transcribe_audio(filename=filename, data=data)
+
+
+@router.post("/meetings/format-speakers")
+async def meetings_format_speakers(
+    body: FormatSpeakersBody, _user: CurrentUserDep
+) -> dict:
+    from app.services.f3_speakers import format_speakers
+
+    return await format_speakers(
+        transcript=body.transcript,
+        known_speakers=body.known_speakers,
     )
 
 

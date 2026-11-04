@@ -54,6 +54,16 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 5
     embedding_timeout_seconds: int = 15
 
+    # Groq Whisper STT (should-have audio → text)
+    stt_provider: str = "groq"
+    stt_api_key: str = ""
+    stt_model: str = "whisper-large-v3-turbo"
+    stt_timeout_seconds: int = 120
+    stt_max_audio_mb: int = 25
+
+    # F1 Gmail sync — when true, Sync without a Google token returns demo fixtures
+    demo_gmail_fixtures: bool = True
+
     @field_validator("database_url")
     @classmethod
     def use_asyncpg_driver(cls, value: str) -> str:
@@ -84,6 +94,14 @@ class Settings(BaseSettings):
             and self.azure_openai_endpoint.strip()
             and self.embedding_model.strip()
             and self.embedding_dimensions > 0
+        )
+
+    @property
+    def stt_configured(self) -> bool:
+        return bool(
+            self.stt_provider.strip()
+            and self.stt_api_key.strip()
+            and self.stt_model.strip()
         )
 
 

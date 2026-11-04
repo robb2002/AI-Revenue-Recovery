@@ -1,12 +1,38 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Sparkles } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Mic, Sparkles, Trash2, UserRoundX } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { apiRequest } from '../../api/client'
 import { FictionalBadge } from '../../components/FictionalBadge'
+import {
+  anonymizeSpeakersInTranscript,
+  clearKnownSpeakers,
+  extractSpeakerNamesFromTranscript,
+  loadKnownSpeakers,
+  saveKnownSpeakers,
+} from '../../features/f3_meetings/speakerMemory'
 
 type ExtractionItem = { value: string; status: string; quote?: string }
 type Extraction = Record<string, ExtractionItem | ExtractionItem[] | undefined>
+
+function StatusPill({ status }: { status: string }) {
+  const s =
+    status === 'confirmed'
+      ? 'border-green-600/40 text-green-700 bg-green-50'
+      : status === 'unconfirmed'
+        ? 'border-amber-600/40 text-amber-700 bg-amber-50'
+        : 'border-neutral-300 text-neutral-600 bg-neutral-50'
+  return (
+    <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize ${s}`}>
+      {status}
+    </span>
+  )
+}
+
+function asItems(value: ExtractionItem | ExtractionItem[] | undefined): ExtractionItem[] {
+  if (!value) return []
+  return Array.isArray(value) ? value : [value]
+}
 
 type MeetingsPayload = {
   account_id: string
@@ -63,29 +89,23 @@ type SavePreview = {
   proposed_uploaded_meeting: { meeting_id: string }
 }
 
-function StatusPill({ status }: { status: string }) {
-  const s =
-    status === 'confirmed'
-      ? 'border-green-600/40 text-green-700 bg-green-50'
-      : status === 'unconfirmed'
-        ? 'border-amber-600/40 text-amber-700 bg-amber-50'
-        : 'border-neutral-300 text-neutral-600 bg-neutral-50'
-  return (
-    <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium capitalize ${s}`}>
-      {status}
-    </span>
-  )
+type TranscribeResult = {
+  transcript: string
+  source: string
+  notice?: string
 }
 
-function asItems(value: ExtractionItem | ExtractionItem[] | undefined): ExtractionItem[] {
-  if (!value) return []
-  return Array.isArray(value) ? value : [value]
+type FormatSpeakersResult = {
+  formatted: string
+  speakers: string[]
+  source: string
 }
 
 export function MeetingsPage() {
   const { accountId: routeAccountId } = useParams()
   const accountId = routeAccountId || 'ACC-0181'
   const qc = useQueryClient()
+  const audioInputRef = useRef<HTMLInputElement>(null)
 
   const [transcript, setTranscript] = useState('')
   const [uploadMeta, setUploadMeta] = useState<UploadResult | null>(null)
@@ -94,6 +114,8 @@ export function MeetingsPage() {
   const [preview, setPreview] = useState<SavePreview | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [matchConfirmed, setMatchConfirmed] = useState(false)
+  const [knownSpeakers, setKnownSpeakers] = useState<string[]>(() => loadKnownSpeakers())
+  const [machineTranscribed, setMachineTranscribed] = useState(false)
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['meetings', accountId],
@@ -105,6 +127,51 @@ export function MeetingsPage() {
   const opportunityId =
     uploadMeta?.selected_match?.opportunity_id || data?.opportunity_id || 'OPP-0181'
 
+  const clearAll = () => {
+    setTranscript('')
+    setUploadMeta(null)
+    setExtraction(null)
+    setExtractSource(null)
+    setPreview(null)
+    setMatchConfirmed(false)
+    setMachineTranscribed(false)
+    setToast(null)
+    if (audioInputRef.current) audioInputRef.current.value = ''
+  }
+
+  const handleClearNames = () => {
+    clearKnownSpeakers()
+    setKnownSpeakers([])
+    if (transcript.trim()) {
+      setTranscript(anonymizeSpeakersInTranscript(transcript))
+    }
+    setToast('Speaker names cleared to Person 1, Person 2, …')
+  }
+
+  const rememberSpeakers = (names: string[]) => {
+    const merged = saveKnownSpeakers(names)
+    setKnownSpeakers(merged)
+  }
+
+  const applySpeakerFormat = async (rawText: string) => {
+    const result = await apiRequest<FormatSpeakersResult>('/api/v1/meetings/format-speakers', {
+      method: 'POST',
+      body: JSON.stringify({
+        transcript: rawText,
+        known_speakers: knownSpeakers,
+      }),
+    })
+    setTranscript(result.formatted)
+    setExtraction(null)
+    setExtractSource(null)
+    const detected =
+      result.speakers.length > 0
+        ? result.speakers
+        : extractSpeakerNamesFromTranscript(result.formatted)
+    rememberSpeakers(detected)
+    return result
+  }
+
   const loadSample = useMutation({
     mutationFn: () =>
       apiRequest<{ transcript: string; filename: string; account_id: string }>(
@@ -112,6 +179,8 @@ export function MeetingsPage() {
       ),
     onSuccess: (d) => {
       setTranscript(d.transcript)
+      setMachineTranscribed(false)
+      setExtraction(null)
       setUploadMeta({
         meeting_id: `mtg-sample-${Date.now().toString(36)}`,
         storage_path: `meetings/sample/${d.filename}`,
@@ -132,29 +201,7 @@ export function MeetingsPage() {
     },
   })
 
-  const upload = useMutation({
-    mutationFn: async (file: File) => {
-      const form = new FormData()
-      form.append('file', file)
-      form.append('account_id', accountId)
-      if (opportunityId) form.append('opportunity_id', opportunityId)
-      return apiRequest<UploadResult>('/api/v1/meetings/upload', {
-        method: 'POST',
-        body: form,
-        // apiRequest may set JSON content-type — override by not stringifying
-      } as RequestInit & { body: FormData })
-    },
-    onSuccess: (d) => {
-      setUploadMeta(d)
-      setTranscript(d.transcript)
-      setMatchConfirmed(!d.needs_confirmation && !!d.selected_match)
-      setExtraction(null)
-      setToast('File uploaded to storage. Confirm account, then Extract.')
-    },
-    onError: (e) => setToast(e instanceof Error ? e.message : 'Upload failed'),
-  })
-
-  const extract = useMutation({
+  const extractIntelligence = useMutation({
     mutationFn: () =>
       apiRequest<ExtractResult>('/api/v1/meetings/extract', {
         method: 'POST',
@@ -173,6 +220,60 @@ export function MeetingsPage() {
           : 'Heuristic extraction (AI unavailable or fallback). Review before save.',
       )
     },
+    onError: (e) => setToast(e instanceof Error ? e.message : 'Extraction failed'),
+  })
+
+  const transcribeAudio = useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData()
+      form.append('file', file)
+      const transcribed = await apiRequest<TranscribeResult>('/api/v1/meetings/transcribe', {
+        method: 'POST',
+        body: form,
+      })
+      if (!transcribed.transcript.trim()) {
+        throw new Error('No speech detected in the audio file.')
+      }
+      const combined = transcript.trim()
+        ? `${transcript.trim()}\n\n${transcribed.transcript}`
+        : transcribed.transcript
+      let formatted = combined
+      try {
+        const result = await applySpeakerFormat(combined)
+        formatted = result.formatted
+      } catch {
+        // Keep raw transcript if formatting fails; user can retry Format speakers.
+      }
+      return { transcribed, file, combined, formatted }
+    },
+    onSuccess: ({ transcribed, file, formatted }) => {
+      setTranscript(formatted)
+      setMachineTranscribed(true)
+      setExtraction(null)
+      const meetingId = `mtg-audio-${Date.now().toString(36)}`
+      const stem = file.name.replace(/\.[^.]+$/, '') || 'audio'
+      setUploadMeta({
+        meeting_id: meetingId,
+        storage_path: `meetings/audio-transcript/${meetingId}.txt`,
+        uploaded_file_name: file.name,
+        uploaded_file_type: 'audio',
+        content_hash: `audio-${meetingId}`,
+        transcript: formatted,
+        selected_match: {
+          account_id: accountId,
+          account_name: data?.account_name || accountId,
+          opportunity_id: data?.opportunity_id || opportunityId,
+        },
+        suggested_matches: [],
+        needs_confirmation: false,
+      })
+      setMatchConfirmed(true)
+      setToast(
+        transcribed.notice ||
+          `Transcribed ${stem} and formatted speakers. Review before save. Audio was not stored.`,
+      )
+    },
+    onError: (e) => setToast(e instanceof Error ? e.message : 'Audio transcription failed'),
   })
 
   const saveBody = useMemo(() => {
@@ -192,20 +293,66 @@ export function MeetingsPage() {
   }, [uploadMeta, extraction, resolvedAccount, opportunityId, transcript])
 
   const loadPreview = useMutation({
-    mutationFn: () =>
-      apiRequest<SavePreview>('/api/v1/meetings/save/preview', {
+    mutationFn: async () => {
+      if (!uploadMeta) throw new Error('Upload or transcribe audio first.')
+      if (!transcript.trim()) throw new Error('Transcript is empty.')
+      if (!matchConfirmed) throw new Error('Confirm the account match first.')
+
+      let nextExtraction = extraction
+      if (!nextExtraction) {
+        const extracted = await apiRequest<ExtractResult>('/api/v1/meetings/extract', {
+          method: 'POST',
+          body: JSON.stringify({
+            transcript,
+            account_id: resolvedAccount,
+            opportunity_id: opportunityId,
+          }),
+        })
+        nextExtraction = extracted.extraction
+        setExtraction(nextExtraction)
+      }
+
+      const body = {
+        confirm: false,
+        account_id: resolvedAccount,
+        opportunity_id: opportunityId,
+        storage_path: uploadMeta.storage_path,
+        uploaded_file_name: uploadMeta.uploaded_file_name,
+        uploaded_file_type: uploadMeta.uploaded_file_type,
+        transcript,
+        extraction: nextExtraction,
+        meeting_id: uploadMeta.meeting_id,
+        content_hash: uploadMeta.content_hash,
+      }
+      return apiRequest<SavePreview>('/api/v1/meetings/save/preview', {
         method: 'POST',
-        body: JSON.stringify(saveBody),
-      }),
+        body: JSON.stringify(body),
+      })
+    },
     onSuccess: setPreview,
+    onError: (e) => setToast(e instanceof Error ? e.message : 'Preview failed'),
   })
 
   const confirmSave = useMutation({
-    mutationFn: () =>
-      apiRequest('/api/v1/meetings/save', {
+    mutationFn: () => {
+      if (!saveBody && !uploadMeta) throw new Error('Nothing to save.')
+      const body = saveBody ?? {
+        confirm: true,
+        account_id: resolvedAccount,
+        opportunity_id: opportunityId,
+        storage_path: uploadMeta!.storage_path,
+        uploaded_file_name: uploadMeta!.uploaded_file_name,
+        uploaded_file_type: uploadMeta!.uploaded_file_type,
+        transcript,
+        extraction: extraction ?? {},
+        meeting_id: uploadMeta!.meeting_id,
+        content_hash: uploadMeta!.content_hash,
+      }
+      return apiRequest('/api/v1/meetings/save', {
         method: 'POST',
-        body: JSON.stringify({ ...saveBody, confirm: true }),
-      }),
+        body: JSON.stringify({ ...body, confirm: true }),
+      })
+    },
     onSuccess: () => {
       setPreview(null)
       setToast('Meeting appended to uploaded_meetings. Pre-generated meeting kept.')
@@ -213,6 +360,12 @@ export function MeetingsPage() {
       void qc.invalidateQueries({ queryKey: ['meetings', accountId] })
     },
   })
+
+  const busy =
+    transcribeAudio.isPending ||
+    extractIntelligence.isPending ||
+    loadPreview.isPending ||
+    confirmSave.isPending
 
   const groups: Array<{ key: string; label: string }> = [
     { key: 'meeting_summary', label: 'Summary' },
@@ -238,7 +391,7 @@ export function MeetingsPage() {
           </Link>
           <h2 className="mt-2 text-2xl font-semibold text-neutral-900">Meeting intelligence</h2>
           <p className="mt-1 text-sm text-neutral-500">
-            {data?.account_name || accountId} · extract then save only after you confirm
+            {data?.account_name || accountId} · upload audio or paste, then save only after you confirm
           </p>
         </div>
         <FictionalBadge />
@@ -276,7 +429,7 @@ export function MeetingsPage() {
           <section className="rounded-lg border border-neutral-200 bg-white p-4">
             <h3 className="text-sm font-semibold text-neutral-900">Uploaded meetings</h3>
             {data.uploaded_meetings.length === 0 ? (
-              <p className="mt-2 text-sm text-neutral-500">None yet — upload and confirm below.</p>
+              <p className="mt-2 text-sm text-neutral-500">None yet — upload audio and confirm below.</p>
             ) : (
               <ul className="mt-3 space-y-2">
                 {data.uploaded_meetings.map((m) => (
@@ -297,33 +450,71 @@ export function MeetingsPage() {
       <section className="rounded-lg border border-neutral-200 bg-white p-4 space-y-4">
         <h3 className="text-sm font-semibold text-neutral-900">Upload / paste transcript</h3>
         <div className="flex flex-wrap gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-navy-50">
-            <FileText className="size-4" />
-            Choose file (txt)
-            <input
-              type="file"
-              accept=".txt,.pdf,.docx,.csv"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) upload.mutate(f)
-              }}
-            />
-          </label>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => audioInputRef.current?.click()}
+            className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-navy-50 disabled:opacity-50"
+          >
+            <Mic className="size-4" />
+            {transcribeAudio.isPending ? 'Transcribing…' : 'Choose audio'}
+          </button>
+          <input
+            ref={audioInputRef}
+            type="file"
+            accept="audio/*,.mp3,.wav,.m4a,.webm,.ogg,.mp4,.mpeg"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = ''
+              if (f) transcribeAudio.mutate(f)
+            }}
+          />
           <button
             type="button"
             onClick={() => loadSample.mutate()}
-            className="rounded-md border border-navy-600 bg-navy-50 px-3 py-2 text-sm font-medium text-navy-700"
+            disabled={busy}
+            className="rounded-md border border-navy-600 bg-navy-50 px-3 py-2 text-sm font-medium text-navy-700 disabled:opacity-50"
           >
             Load ACC-0181 sample TXT
           </button>
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={busy || (!transcript && !uploadMeta)}
+            className="inline-flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+          >
+            <Trash2 className="size-4" />
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={handleClearNames}
+            disabled={busy || (!transcript.trim() && knownSpeakers.length === 0)}
+            title="Reset named speakers to Person 1, Person 2, …"
+            className="inline-flex items-center gap-2 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+          >
+            <UserRoundX className="size-4" />
+            Clear names
+          </button>
         </div>
         <p className="text-xs text-neutral-500">
-          CSV is rejected. Demo path: Georgia Tech follow-up call sample.
+          Audio is transcribed with Groq Whisper and is not stored. Demo path: Georgia Tech
+          follow-up call sample.
+          {knownSpeakers.length > 0 ? ` · Remembered names: ${knownSpeakers.join(', ')}` : ''}
         </p>
+        {machineTranscribed && (
+          <p className="text-xs text-amber-800">
+            Machine-transcribed text — review before saving. May contain STT errors.
+          </p>
+        )}
         <textarea
           value={transcript}
-          onChange={(e) => setTranscript(e.target.value)}
+          onChange={(e) => {
+            setTranscript(e.target.value)
+            setExtraction(null)
+            setExtractSource(null)
+          }}
           rows={12}
           className="w-full rounded-md border border-neutral-300 p-3 font-mono text-xs text-neutral-800"
           placeholder="Transcript text…"
@@ -373,7 +564,7 @@ export function MeetingsPage() {
               </button>
             )}
             {matchConfirmed && (
-              <p className="mt-2 text-xs text-green-700">Match confirmed for extract/save.</p>
+              <p className="mt-2 text-xs text-green-700">Match confirmed for save.</p>
             )}
           </div>
         )}
@@ -381,20 +572,20 @@ export function MeetingsPage() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={!transcript || !matchConfirmed || extract.isPending}
-            onClick={() => extract.mutate()}
+            disabled={!transcript.trim() || !matchConfirmed || busy}
+            onClick={() => extractIntelligence.mutate()}
             className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
             <Sparkles className="size-4" />
-            {extract.isPending ? 'Extracting…' : 'Extract'}
+            {extractIntelligence.isPending ? 'Extracting…' : 'Extract intelligence'}
           </button>
           <button
             type="button"
-            disabled={!extraction || !saveBody || loadPreview.isPending}
+            disabled={!transcript || !matchConfirmed || !uploadMeta || !extraction || busy}
             onClick={() => loadPreview.mutate()}
             className="rounded-md bg-navy-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            Save to CRM (preview)
+            {loadPreview.isPending ? 'Preparing…' : 'Save to CRM (preview)'}
           </button>
         </div>
       </section>
@@ -402,10 +593,8 @@ export function MeetingsPage() {
       {extraction && (
         <section className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-4">
           <h3 className="text-sm font-semibold text-neutral-900">
-            Extraction review{' '}
-            <span className="font-normal text-neutral-500">
-              · {extractSource || 'rules'}
-            </span>
+            Extracted intelligence{' '}
+            <span className="font-normal text-neutral-500">· {extractSource || 'rules'}</span>
           </h3>
           <p className="mt-1 text-xs text-amber-800">
             Held-back check: no invented approved budget amount or discount %.

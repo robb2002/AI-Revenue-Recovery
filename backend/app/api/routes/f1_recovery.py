@@ -18,6 +18,10 @@ class ConfirmBody(BaseModel):
     gmail_message_id: str | None = None
 
 
+class GmailSyncBody(BaseModel):
+    access_token: str | None = None
+
+
 @router.get("/recovery")
 async def recovery_list(
     _user: CurrentUserDep,
@@ -68,19 +72,36 @@ async def reject_draft(
 
 @router.get("/gmail/status")
 async def gmail_status(_user: CurrentUserDep) -> dict:
+    from app.core.config import get_settings
+
+    settings = get_settings()
     return {
         "connected": False,
-        "mode": "fixture",
-        "message": "Live Gmail OAuth not configured — Sync Gmail returns demo fixtures.",
+        "mode": "token_client",
+        "fixtures_fallback": settings.demo_gmail_fixtures,
+        "message": (
+            "Connect Gmail in the browser (readonly), then Sync. "
+            "Without a token, demo fixtures are returned when fixtures fallback is on."
+        ),
     }
 
 
 @router.post("/accounts/{account_id}/gmail/sync")
 async def gmail_sync(
-    account_id: str, _user: CurrentUserDep, session: SessionDep
+    account_id: str,
+    _user: CurrentUserDep,
+    session: SessionDep,
+    body: GmailSyncBody = GmailSyncBody(),
 ) -> dict:
-    detail = await svc.get_recovery_detail(session, account_id)
-    return svc.sync_gmail_fixtures(account_id, detail.get("contact_email"))
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    return await svc.sync_gmail_live(
+        session,
+        account_id=account_id,
+        access_token=body.access_token,
+        allow_fixtures=settings.demo_gmail_fixtures,
+    )
 
 
 @router.get("/accounts/{account_id}/gmail/thread")

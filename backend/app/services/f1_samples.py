@@ -81,6 +81,10 @@ def gmail_fixture(account_id: str, contact_email: str) -> dict:
                 "to": rep,
                 "subject": new_subj,
                 "snippet": "Thanks for holding — can we revisit after our November planning meeting?",
+                "body": (
+                    "Thanks for holding — can we revisit after our November planning meeting?\n\n"
+                    "Happy to pick up the evaluation once timing is clearer."
+                ),
                 "classification": "new",
             }
         ],
@@ -93,6 +97,10 @@ def gmail_fixture(account_id: str, contact_email: str) -> dict:
                 "to": email,
                 "subject": prev_subj,
                 "snippet": "Sharing the outline we discussed and proposed pilot scope.",
+                "body": (
+                    "Sharing the outline we discussed and proposed pilot scope.\n\n"
+                    "Let me know if you want a follow-up call next week."
+                ),
                 "classification": "previous",
             },
             {
@@ -103,6 +111,10 @@ def gmail_fixture(account_id: str, contact_email: str) -> dict:
                 "to": rep,
                 "subject": f"Re: {prev_subj}",
                 "snippet": "We need to pause — budget timing is the blocker for this quarter.",
+                "body": (
+                    "We need to pause — budget timing is the blocker for this quarter.\n\n"
+                    "Please keep the materials handy for when we reopen."
+                ),
                 "classification": "previous",
             },
         ],
