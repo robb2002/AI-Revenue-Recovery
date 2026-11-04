@@ -3,6 +3,8 @@ import { AppShell } from '../components/AppShell'
 import { BriefingPage } from '../pages/BriefingPage'
 import { DataStatusPage } from '../pages/DataStatusPage'
 import { LoginPage } from '../pages/LoginPage'
+import { RecoveryDetailPage } from '../pages/f1_recovery/RecoveryDetailPage'
+import { RecoveryListPage } from '../pages/f1_recovery/RecoveryListPage'
 import { PlaceholderPage } from '../pages/PlaceholderPage'
 import { RequireAuth } from './RequireAuth'
 
@@ -13,15 +15,8 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route index element={<BriefingPage />} />
-          <Route
-            path="recovery"
-            element={
-              <PlaceholderPage
-                title="Lost lead recovery"
-                blurb="F1 — ranked lost/inactive accounts, re-engagement drafts, Gmail sync, CRM log."
-              />
-            }
-          />
+          <Route path="recovery" element={<RecoveryListPage />} />
+          <Route path="recovery/:accountId" element={<RecoveryDetailPage />} />
           <Route
             path="risk"
             element={
@@ -33,12 +28,6 @@ export function AppRoutes() {
           />
           <Route path="risk/:accountId" element={<PlaceholderPage title="Deal risk" blurb="F2 detail — coming next." />} />
           <Route path="knowledge" element={<PlaceholderPage title="Knowledge base" blurb="F4 document index." />} />
-          <Route
-            path="signal-scout"
-            element={
-              <PlaceholderPage title="Signal Scout" blurb="F7 stretch — pre-RFP signals after F1–F6." />
-            }
-          />
           <Route path="data" element={<DataStatusPage />} />
         </Route>
       </Route>

@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = "http://localhost:5173"
     demo_as_of_date: str = "2026-11-04"
 
+    # Azure OpenAI (same keys as Sales Intelligence)
+    llm_provider: str = "azure_openai"
+    llm_api_key: str = ""
+    llm_model: str = "interns-gpt-4.1"
+    llm_timeout_seconds: int = 60
+    azure_openai_endpoint: str = ""
+    azure_openai_api_version: str = "2024-02-15-preview"
+
     @field_validator("database_url")
     @classmethod
     def use_asyncpg_driver(cls, value: str) -> str:
@@ -51,6 +59,16 @@ class Settings(BaseSettings):
             for origin in self.cors_allowed_origins.split(",")
             if origin.strip()
         ]
+
+    @property
+    def llm_configured(self) -> bool:
+        if self.llm_provider != "azure_openai":
+            return bool(self.llm_api_key.strip() and self.llm_model.strip())
+        return bool(
+            self.llm_api_key.strip()
+            and self.azure_openai_endpoint.strip()
+            and self.llm_model.strip()
+        )
 
 
 @lru_cache
